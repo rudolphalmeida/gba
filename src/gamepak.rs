@@ -19,6 +19,8 @@ pub struct GamePakHeader {
     maker_code: String,
 }
 
+/// The `Gamepak` struct contains the header and ROM bytes to be mapped to
+/// memory beginning from `0x80000000`
 #[derive(Debug, Clone)]
 pub struct Gamepak {
     header: GamePakHeader,
@@ -26,6 +28,7 @@ pub struct Gamepak {
 }
 
 impl Gamepak {
+    /// Extract out the header and init a `Gamepak` from the given ROM bytes
     pub fn new(rom: Vec<u8>) -> anyhow::Result<Gamepak, GamePakError> {
         let header = Gamepak::parse_header(&rom[..0xC0])?;
         Ok(Gamepak {
@@ -34,6 +37,8 @@ impl Gamepak {
         })
     }
 
+    /// Extract out fields from the header and also check the expected bytes
+    /// and checksum
     fn parse_header(header: &[u8]) -> anyhow::Result<GamePakHeader, GamePakError> {
         // Extract out fields
         let title = match std::str::from_utf8(&header[0xA0..0xAC]) {
@@ -66,7 +71,19 @@ impl Gamepak {
             }
         };
 
-        // TODO: Perform expected byte checks
+        if header[0xB2] != 0x96 {
+            return Err(GamePakError::Header {
+                expected: "0x96 at offset 0xB2".to_string(),
+                got: format!("{:#04X}", header[0xB2]),
+            });
+        }
+
+        if header[0xB3] != 0x00 {
+            return Err(GamePakError::Header {
+                expected: "0x00 at offset 0xB3".to_string(),
+                got: format!("{:#04X}", header[0xB3]),
+            });
+        }
 
         Ok(GamePakHeader {
             title,
@@ -78,7 +95,7 @@ impl Gamepak {
 
 #[derive(Error, Debug)]
 pub enum GamePakError {
-    #[error("Invalid header (expected '{expected:?}'; got {got:?})")]
+    #[error("Invalid header (expected '{expected}'; got {got})")]
     Header { expected: String, got: String },
     #[error("Invalid size (expected '{expected}'; got '{got}')")]
     Size { expected: usize, got: usize },
@@ -86,8 +103,25 @@ pub enum GamePakError {
 
 #[cfg(test)]
 mod tests {
+    use crate::gamepak::Gamepak;
+
     #[test]
-    fn test_reading_header() {}
+    fn test_reading_header() -> anyhow::Result<()> {
+        let mut header_bytes = vec![0x00; 0xC0];
+
+        header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
+        header_bytes[0xAC..0xB0].copy_from_slice("BMXE".as_bytes());
+        header_bytes[0xB0..0xB2].copy_from_slice("01".as_bytes());
+        header_bytes[0xB2] = 0x96;
+
+        let header = Gamepak::parse_header(&header_bytes)?;
+
+        assert_eq!(header.title, "ZEROMISSIONE");
+        assert_eq!(header.game_code, "BMXE");
+        assert_eq!(header.maker_code, "01");
+
+        Ok(())
+    }
 
     #[test]
     fn test_invalid_header() {}
