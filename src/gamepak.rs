@@ -40,6 +40,13 @@ impl Gamepak {
     /// Extract out fields from the header and also check the expected bytes
     /// and checksum
     fn parse_header(header: &[u8]) -> anyhow::Result<GamePakHeader, GamePakError> {
+        if header.len() != 0xC0 {
+            return Err(GamePakError::Size {
+                expected: 0xC0,
+                got: header.len(),
+            });
+        }
+
         // Extract out fields
         let title = match std::str::from_utf8(&header[0xA0..0xAC]) {
             Ok(value) => value.to_string(),
@@ -103,10 +110,10 @@ pub enum GamePakError {
 
 #[cfg(test)]
 mod tests {
-    use crate::gamepak::Gamepak;
+    use crate::gamepak::{GamePakError, GamePakHeader, Gamepak};
 
     #[test]
-    fn test_reading_header() -> anyhow::Result<()> {
+    fn test_valid_header() -> anyhow::Result<()> {
         let mut header_bytes = vec![0x00; 0xC0];
 
         header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
@@ -124,8 +131,87 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_header() {}
+    fn test_invalid_header() {
+        let mut header_bytes = vec![0x00; 0xC0];
+        header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
+        header_bytes[0xAC..0xB0].copy_from_slice("BMXE".as_bytes());
+        header_bytes[0xB0..0xB2].copy_from_slice("01".as_bytes());
+
+        // Invalid UTF-8 in title
+        let temp = header_bytes[0xA1];
+        header_bytes[0xA1] = 0xFF;
+        let header = Gamepak::parse_header(&header_bytes);
+        assert!(matches!(
+            header,
+            Err(GamePakError::Header {
+                expected: _,
+                got: _
+            })
+        ));
+        header_bytes[0xA1] = temp;
+
+        // Unexpected value at offset `0xB2`
+        let header = Gamepak::parse_header(&header_bytes);
+        assert!(matches!(
+            header,
+            Err(GamePakError::Header {
+                expected: _,
+                got: _,
+            })
+        ));
+        header_bytes[0xB2] = 0x96;
+
+        // Unexpected value at offset `0xB3`
+        header_bytes[0xB3] = 0x1;
+        let header = Gamepak::parse_header(&header_bytes);
+        assert!(matches!(
+            header,
+            Err(GamePakError::Header {
+                expected: _,
+                got: _,
+            })
+        ));
+        header_bytes[0xB3] = 0x00;
+
+        // Correct header
+        let header = Gamepak::parse_header(&header_bytes);
+        assert!(matches!(
+            header,
+            Ok(GamePakHeader {
+                title: _,
+                game_code: _,
+                maker_code: _
+            })
+        ));
+    }
 
     #[test]
-    fn test_invalid_size() {}
+    fn test_invalid_size() {
+        let mut header_bytes = vec![0x00; 0xC1];
+        header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
+        header_bytes[0xAC..0xB0].copy_from_slice("BMXE".as_bytes());
+        header_bytes[0xB0..0xB2].copy_from_slice("01".as_bytes());
+        header_bytes[0xB2] = 0x96;
+
+        // Invalid size
+        let header = Gamepak::parse_header(&header_bytes);
+        assert!(matches!(
+            header,
+            Err(GamePakError::Size {
+                expected: 0xC0,
+                got: 0xC1
+            })
+        ));
+
+        // Valid size
+        let header = Gamepak::parse_header(&header_bytes[..0xC0]);
+        assert!(matches!(
+            header,
+            Ok(GamePakHeader {
+                title: _,
+                game_code: _,
+                maker_code: _
+            })
+        ));
+    }
 }
