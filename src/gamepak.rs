@@ -7,33 +7,46 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub struct GamePakHeader {
     /// The `title` is a 12 byte uppercase ASCII string located at offset `0xA0`
-    title: String,
+    pub title: String,
     /// The `game_code` is a 4 byte uppercase ASCII code at offset `0xAC`
     /// It is built from 3 components (`UTTD`):
     /// 1. U  Unique Code (Usually `"A"` or `"B"` or some special meaning)
     /// 2. TT Short Title (or something random and unique if clash)
     /// 3. D  Destination (e.g. `"J" for Japan, `"E"` for USA/English, etc.)
-    game_code: String,
+    pub game_code: String,
     /// The `maker_code` is a 2 byte ASCII uppercase value representing the
     /// developer of the game. E.g. "01" = Nintendo at offset `0xB0`
-    maker_code: String,
+    pub maker_code: String,
 }
 
 /// The `Gamepak` struct contains the header and ROM bytes to be mapped to
 /// memory beginning from `0x80000000`
 #[derive(Debug, Clone)]
 pub struct Gamepak {
-    header: GamePakHeader,
-    rom: Vec<u8>,
+    pub header: GamePakHeader,
+    pub rom: Vec<u8>,
 }
 
 impl Gamepak {
     /// Extract out the header and init a `Gamepak` from the given ROM bytes
     pub fn new(rom: Vec<u8>) -> anyhow::Result<Gamepak, GamePakError> {
         let header = Gamepak::parse_header(&rom[..0xC0])?;
+        let mut rom_data = rom[0xC0..].iter().map(|&v| v).collect::<Vec<u8>>();
+
+        if (rom_data.len() & (rom_data.len() - 1)) != 0 {  // ROM data is not a power of 2
+            let mut size = rom_data.len();
+            size |= size >> 1;
+            size |= size >> 2;
+            size |= size >> 4;
+            size |= size >> 8;
+            size |= size >> 16;
+            size |= size >> 32;
+            rom_data.resize(size + 1, 0x00);
+        }
+
         Ok(Gamepak {
             header,
-            rom: vec![],
+            rom: rom_data,
         })
     }
 
@@ -112,8 +125,7 @@ pub enum GamePakError {
 mod tests {
     use crate::gamepak::{GamePakError, GamePakHeader, Gamepak};
 
-    #[test]
-    fn test_valid_header() -> anyhow::Result<()> {
+    fn gen_header() -> Vec<u8> {
         let mut header_bytes = vec![0x00; 0xC0];
 
         header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
@@ -121,6 +133,12 @@ mod tests {
         header_bytes[0xB0..0xB2].copy_from_slice("01".as_bytes());
         header_bytes[0xB2] = 0x96;
 
+        header_bytes
+    }
+
+    #[test]
+    fn test_valid_header() -> anyhow::Result<()> {
+        let header_bytes = gen_header();
         let header = Gamepak::parse_header(&header_bytes)?;
 
         assert_eq!(header.title, "ZEROMISSIONE");
@@ -132,10 +150,7 @@ mod tests {
 
     #[test]
     fn test_invalid_header() {
-        let mut header_bytes = vec![0x00; 0xC0];
-        header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
-        header_bytes[0xAC..0xB0].copy_from_slice("BMXE".as_bytes());
-        header_bytes[0xB0..0xB2].copy_from_slice("01".as_bytes());
+        let mut header_bytes = gen_header();
 
         // Invalid UTF-8 in title
         let temp = header_bytes[0xA1];
@@ -151,6 +166,7 @@ mod tests {
         header_bytes[0xA1] = temp;
 
         // Unexpected value at offset `0xB2`
+        header_bytes[0xB2] = 0xFF;
         let header = Gamepak::parse_header(&header_bytes);
         assert!(matches!(
             header,
@@ -187,11 +203,8 @@ mod tests {
 
     #[test]
     fn test_invalid_size() {
-        let mut header_bytes = vec![0x00; 0xC1];
-        header_bytes[0xA0..0xAC].copy_from_slice("ZEROMISSIONE".as_bytes());
-        header_bytes[0xAC..0xB0].copy_from_slice("BMXE".as_bytes());
-        header_bytes[0xB0..0xB2].copy_from_slice("01".as_bytes());
-        header_bytes[0xB2] = 0x96;
+        let mut header_bytes = gen_header();
+        header_bytes.resize(0xC1, 0x00);
 
         // Invalid size
         let header = Gamepak::parse_header(&header_bytes);
@@ -213,5 +226,17 @@ mod tests {
                 maker_code: _
             })
         ));
+    }
+
+    #[test]
+    fn test_rom_size() {
+        let mut rom = gen_header();  // Len 0xC0
+        rom.resize(0x3FFA, 0x00);
+        let gamepak = Gamepak::new(rom);
+        assert!(gamepak.is_ok());
+        let gamepak = gamepak.unwrap();
+        let rom_len = gamepak.rom.len();
+        assert_eq!(rom_len, 0x4000);
+        assert_eq!(rom_len & (rom_len - 1), 0);  // ROM size should be power of 2
     }
 }

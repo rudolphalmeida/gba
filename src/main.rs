@@ -9,7 +9,7 @@ fn main() -> io::Result<()> {
     let options = Options::parse();
     let rom = std::fs::read(options.rom)?;
     let game_pak = Gamepak::new(rom).unwrap();
-    println!("{game_pak:?}");
+    println!("{:?}", game_pak.header);
 
     Ok(())
 }
