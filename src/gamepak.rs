@@ -33,14 +33,17 @@ impl Gamepak {
         let header = Gamepak::parse_header(&rom[..0xC0])?;
         let mut rom_data = rom[0xC0..].iter().map(|&v| v).collect::<Vec<u8>>();
 
-        if (rom_data.len() & (rom_data.len() - 1)) != 0 {  // ROM data is not a power of 2
+        if (rom_data.len() & (rom_data.len() - 1)) != 0 {
+            // ROM data is not a power of 2
             let mut size = rom_data.len();
             size |= size >> 1;
             size |= size >> 2;
             size |= size >> 4;
             size |= size >> 8;
             size |= size >> 16;
-            size |= size >> 32;
+            if (std::mem::size_of::<usize>() > 32) {
+                size |= size >> 32;
+            }
             rom_data.resize(size + 1, 0x00);
         }
 
@@ -67,7 +70,7 @@ impl Gamepak {
                 return Err(GamePakError::Header {
                     expected: "Expected ASCII title at offset 0xA0-0xAB".to_string(),
                     got: e.to_string(),
-                })
+                });
             }
         };
 
@@ -77,7 +80,7 @@ impl Gamepak {
                 return Err(GamePakError::Header {
                     expected: "Expected ASCII Game Code at offset 0xAC-0xAF".to_string(),
                     got: e.to_string(),
-                })
+                });
             }
         };
 
@@ -87,7 +90,7 @@ impl Gamepak {
                 return Err(GamePakError::Header {
                     expected: "Expected ASCII Maker Code at offset 0xB0-0xB1".to_string(),
                     got: e.to_string(),
-                })
+                });
             }
         };
 
@@ -123,7 +126,7 @@ pub enum GamePakError {
 
 #[cfg(test)]
 mod tests {
-    use crate::gamepak::{GamePakError, GamePakHeader, Gamepak};
+    use crate::gamepak::{Gamepak, GamePakError, GamePakHeader};
 
     fn gen_header() -> Vec<u8> {
         let mut header_bytes = vec![0x00; 0xC0];
@@ -230,13 +233,13 @@ mod tests {
 
     #[test]
     fn test_rom_size() {
-        let mut rom = gen_header();  // Len 0xC0
+        let mut rom = gen_header(); // Len 0xC0
         rom.resize(0x3FFA, 0x00);
         let gamepak = Gamepak::new(rom);
         assert!(gamepak.is_ok());
         let gamepak = gamepak.unwrap();
         let rom_len = gamepak.rom.len();
         assert_eq!(rom_len, 0x4000);
-        assert_eq!(rom_len & (rom_len - 1), 0);  // ROM size should be power of 2
+        assert_eq!(rom_len & (rom_len - 1), 0); // ROM size should be power of 2
     }
 }
