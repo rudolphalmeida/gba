@@ -9,14 +9,17 @@ pub struct RegisterFile {
     /// `R14` is also known as the **
     /// `R15` is shared for all modes except System/User which gets its own
     registers: [u32; 16],
+    /// Current Program Status Register
     cpsr: u32,
+    /// Saved Program Status Register
+    /// Not used in System/User mode
     spsr: u32,
 }
 
 /// Saved registers when switching modes
 #[derive(Debug, Copy, Clone)]
 pub enum BankedRegisters {
-    System { r13: u32, r14: u32, r15: u32 },
+    User { r13: u32, r14: u32, r15: u32 },
     Fiq { registers: [u32; 7], spsr: u32 },
     Supervisor { r13: u32, r14: u32, spsr: u32 },
     Abort { r13: u32, r14: u32, spsr: u32 },
