@@ -10,8 +10,7 @@ use gba::system_bus::SystemBus;
 
 fn main() -> io::Result<()> {
     let options = Options::parse();
-    let rom = std::fs::read(options.rom)?;
-    let gamepak = match Gamepak::new(rom) {
+    let gamepak = match Gamepak::new(&options.rom) {
         Ok(gamepak) => gamepak,
         Err(e) => {
             eprintln!("Error when parsing ROM: {}", e);
@@ -24,8 +23,6 @@ fn main() -> io::Result<()> {
     loop {
         cpu.tick(&mut bus);
     }
-
-    Ok(())
 }
 
 #[derive(Parser, Debug)]

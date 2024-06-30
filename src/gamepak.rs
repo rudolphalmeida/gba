@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use thiserror::Error;
 
 /// The GBA GamePak is extracted from 192 bytes region at the start of a ROM
@@ -29,22 +31,17 @@ pub struct Gamepak {
 
 impl Gamepak {
     /// Extract out the header and init a `Gamepak` from the given ROM bytes
-    pub fn new(rom: Vec<u8>) -> anyhow::Result<Gamepak, GamePakError> {
-        let header = Gamepak::parse_header(&rom[..0xC0])?;
-        let mut rom_data = rom[0xC0..].iter().map(|&v| v).collect::<Vec<u8>>();
+    pub fn new(path: &Path) -> anyhow::Result<Gamepak, String> {
+        let rom = std::fs::read(path).map_err(|e| e.to_string())?;
+        Gamepak::build_rom(rom).map_err(|e| e.to_string())
+    }
 
-        if (rom_data.len() & (rom_data.len() - 1)) != 0 {
-            // ROM data is not a power of 2
-            let mut size = rom_data.len();
-            size |= size >> 1;
-            size |= size >> 2;
-            size |= size >> 4;
-            size |= size >> 8;
-            size |= size >> 16;
-            if (std::mem::size_of::<usize>() > 32) {
-                size |= size >> 32;
-            }
-            rom_data.resize(size + 1, 0x00);
+    fn build_rom(rom: Vec<u8>) -> anyhow::Result<Gamepak, GamePakError> {
+        let header = Gamepak::parse_header(&rom[..0xC0])?;
+        let mut rom_data = rom[0xC0..].to_vec();
+
+        if !rom_data.len().is_power_of_two() {
+            rom_data.resize(rom_data.len().next_power_of_two(), 0x00);
         }
 
         Ok(Gamepak {
@@ -235,7 +232,7 @@ mod tests {
     fn test_rom_size() {
         let mut rom = gen_header(); // Len 0xC0
         rom.resize(0x3FFA, 0x00);
-        let gamepak = Gamepak::new(rom);
+        let gamepak = Gamepak::build_rom(rom);
         assert!(gamepak.is_ok());
         let gamepak = gamepak.unwrap();
         let rom_len = gamepak.rom.len();
