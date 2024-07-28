@@ -17,7 +17,9 @@ fn main() -> io::Result<()> {
             exit(-1);
         }
     };
-    let mut bus = SystemBus::new(gamepak);
+    let bios = std::fs::read(&options.bios)?;
+
+    let mut bus = SystemBus::new(gamepak, bios);
     let mut cpu = Arm7Cpu::new();
 
     loop {
@@ -30,4 +32,6 @@ fn main() -> io::Result<()> {
 struct Options {
     #[arg(short, long)]
     rom: PathBuf,
+    #[arg(short, long)]
+    bios: PathBuf,
 }

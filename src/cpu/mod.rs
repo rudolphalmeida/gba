@@ -70,8 +70,6 @@ impl Arm7Cpu {
         todo!()
     }
 
-    // TODO: Extract out a trait for SystemBus implementations and make this
-    //       method generic over it
     pub fn tick(&mut self, bus: &mut SystemBus) {
         todo!()
     }
