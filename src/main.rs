@@ -23,7 +23,7 @@ fn main() -> io::Result<()> {
     let mut cpu = Arm7Cpu::new();
 
     loop {
-        cpu.tick(&mut bus);
+        cpu.execute_next(&mut bus);
     }
 }
 

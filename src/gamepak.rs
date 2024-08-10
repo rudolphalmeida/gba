@@ -229,14 +229,13 @@ mod tests {
     }
 
     #[test]
-    fn test_rom_size() {
+    fn test_rom_size() -> Result<(), GamePakError> {
         let mut rom = gen_header(); // Len 0xC0
         rom.resize(0x3FFA, 0x00);
-        let gamepak = Gamepak::build_rom(rom);
-        assert!(gamepak.is_ok());
-        let gamepak = gamepak.unwrap();
-        let rom_len = gamepak.rom.len();
-        assert_eq!(rom_len, 0x4000);
-        assert_eq!(rom_len & (rom_len - 1), 0); // ROM size should be power of 2
+        let gamepak = Gamepak::build_rom(rom)?;
+        assert_eq!(gamepak.rom.len(), 0x4000);
+        assert!(gamepak.rom.len().is_power_of_two());
+
+        Ok(())
     }
 }

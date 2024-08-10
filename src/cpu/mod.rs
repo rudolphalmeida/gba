@@ -12,7 +12,7 @@ pub mod registers;
 /// - Switch to ARM mode when an exception occurs
 /// - (User)[SystemMode::User] mode switches back to previous state when leaving
 ///   an exception
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
 enum ExecutionMode {
     /// Uses the full 32-bit instruction set i.e. each instruction is 32-bits
     /// long. Allows access to all (registers)[RegisterFile].
@@ -23,11 +23,11 @@ enum ExecutionMode {
     Thumb,
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
 enum SystemMode {
-    #[default]
     User,
     Fiq,
+    #[default]
     Supervisor,
     Abort,
     Irq,
@@ -40,6 +40,9 @@ enum SystemMode {
 /// - `D`: Debug extensions
 /// - `M`: Fast multiplexer
 /// - `I`: Enhanced ICE
+///
+/// ## Startup
+/// The ARM7TDMI starts by executing the BIOS from `0x00000000`
 ///
 /// ## Pipelining
 ///
@@ -57,7 +60,7 @@ impl Arm7Cpu {
     pub fn new() -> Self {
         Self {
             registers: RegisterFile::default(),
-            system_mode: SystemMode::User,
+            system_mode: SystemMode::Supervisor,
             execution_mode: ExecutionMode::Arm,
         }
     }
@@ -70,7 +73,34 @@ impl Arm7Cpu {
         todo!()
     }
 
-    pub fn tick(&mut self, bus: &mut SystemBus) {
-        todo!()
+    fn fetch_word(&mut self, bus: &mut SystemBus) -> u32 {
+        bus.read_word(self.registers.get_and_increment_pc(4))
+    }
+
+    pub fn execute_next(&mut self, bus: &mut SystemBus) {
+        match self.execution_mode {
+            ExecutionMode::Arm => self.execute_next_arm(bus),
+            ExecutionMode::Thumb => todo!(),
+        }
+    }
+
+    fn execute_next_arm(&mut self, bus: &mut SystemBus) {
+        let opcode = self.fetch_word(bus);
+        todo!("{:#010X} not implemented", opcode)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cpu::{Arm7Cpu, ExecutionMode, SystemMode};
+    use crate::cpu::registers::PC;
+
+    #[test]
+    fn test_cpu_startup() {
+        let cpu = Arm7Cpu::new();
+
+        assert_eq!(cpu.registers[PC], 0x00000000);
+        assert_eq!(cpu.system_mode, SystemMode::Supervisor);
+        assert_eq!(cpu.execution_mode, ExecutionMode::Arm);
     }
 }

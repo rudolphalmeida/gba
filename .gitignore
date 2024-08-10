@@ -2,11 +2,10 @@
 /Cargo.lock
 
 /*.dll
+**.sav
 
 log.txt
 
 logs
-roms
-
 .idea
 .vscode

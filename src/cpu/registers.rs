@@ -1,3 +1,7 @@
+use std::ops::{Index, IndexMut};
+
+pub const PC: usize = 15;
+
 /// Registers for the current executing mode
 #[derive(Default, Debug, Copy, Clone)]
 pub struct RegisterFile {
@@ -14,6 +18,27 @@ pub struct RegisterFile {
     /// Saved Program Status Register
     /// Not used in System/User mode
     spsr: u32,
+}
+
+impl RegisterFile {
+    pub fn get_and_increment_pc(&mut self, by: u32) -> u32 {
+        let pc = self[PC];
+        self[PC] = self[PC].wrapping_add(by);
+        pc
+    }
+}
+
+impl Index<usize> for RegisterFile {
+    type Output = u32;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.registers[index]
+    }
+}
+
+impl IndexMut<usize> for RegisterFile {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.registers[index]
+    }
 }
 
 /// Saved registers when switching modes
