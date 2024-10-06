@@ -4,20 +4,13 @@ use thiserror::Error;
 
 /// The GBA GamePak is extracted from 192 bytes region at the start of a ROM
 /// file (Mapped to `0x80000000`-`0x800000BF` in the memory space
-/// In addition to the included fields, the byte at offset `0xB2` must be
-/// `0x96` and at `0xB3` must be `0x00` for current GBA models
 #[derive(Debug, Clone)]
 pub struct GamePakHeader {
     /// The `title` is a 12 byte uppercase ASCII string located at offset `0xA0`
     pub title: String,
     /// The `game_code` is a 4 byte uppercase ASCII code at offset `0xAC`
-    /// It is built from 3 components (`UTTD`):
-    /// 1. U  Unique Code (Usually `"A"` or `"B"` or some special meaning)
-    /// 2. TT Short Title (or something random and unique if clash)
-    /// 3. D  Destination (e.g. `"J" for Japan, `"E"` for USA/English, etc.)
     pub game_code: String,
-    /// The `maker_code` is a 2 byte ASCII uppercase value representing the
-    /// developer of the game. E.g. "01" = Nintendo at offset `0xB0`
+    /// The `maker_code` is a 2 byte ASCII uppercase value
     pub maker_code: String,
 }
 

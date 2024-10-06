@@ -22,8 +22,9 @@ fn main() -> io::Result<()> {
     let mut bus = SystemBus::new(gamepak, bios);
     let mut cpu = Arm7Cpu::new();
 
+    // TODO: Should run at 16.78Mhz
     loop {
-        cpu.execute_next(&mut bus);
+        cpu.step(&mut bus);
     }
 }
 
