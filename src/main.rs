@@ -1,38 +1,70 @@
-use std::io;
+use eframe::egui::{menu, Context};
+use eframe::{egui, Frame};
+use gba::gba::Gba;
 use std::path::PathBuf;
-use std::process::exit;
+fn main() {
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native("GBA Emulator", native_options, Box::new(|cc| Ok(Box::new(GbaUi::new(cc))))).unwrap()
+}
 
-use clap::Parser;
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+struct GbaUi {
+    #[serde(skip)]
+    gba: Option<Gba>,
+    bios_path: Option<PathBuf>,
+}
 
-use gba::cpu::Arm7Cpu;
-use gba::gamepak::Gamepak;
-use gba::system_bus::SystemBus;
-
-fn main() -> io::Result<()> {
-    let options = Options::parse();
-    let gamepak = match Gamepak::new(&options.rom) {
-        Ok(gamepak) => gamepak,
-        Err(e) => {
-            eprintln!("Error when parsing ROM: {}", e);
-            exit(-1);
+impl GbaUi {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        if let Some(storage) = cc.storage {
+            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
-    };
-    let bios = std::fs::read(&options.bios)?;
 
-    let mut bus = SystemBus::new(gamepak, bios);
-    let mut cpu = Arm7Cpu::new();
+        Self::default()
+    }
 
-    // TODO: Should run at 16.78Mhz
-    loop {
-        cpu.step(&mut bus);
+    fn show_main_menu(&mut self, ui: &mut egui::Ui) {
+        menu::bar(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Open").clicked() {
+                    if self.bios_path.is_none() {
+                        eprintln!("BIOS path needs to be selected");
+                        return;
+                    }
+
+                    if let Some(path) = rfd::FileDialog::new().add_filter("GBA Roms", &["gba"]).pick_file() {
+                        self.gba = match Gba::new(path, self.bios_path.as_ref().unwrap()) {
+                            Ok(gba) => Some(gba),
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                None
+                            }
+                        };
+                    }
+                }
+            });
+
+            ui.menu_button("BIOS", |ui| {
+                if let Some(path) = self.bios_path.as_ref() {
+                    ui.label(path.to_str().unwrap().to_string());
+                }
+
+                if ui.button("Select").clicked() {
+                    self.bios_path = rfd::FileDialog::new().add_filter("GBA BIOS", &["bin"]).pick_file();
+                }
+            });
+        });
     }
 }
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Options {
-    #[arg(short, long)]
-    rom: PathBuf,
-    #[arg(short, long)]
-    bios: PathBuf,
+impl eframe::App for GbaUi {
+    fn update(&mut self, ctx: &Context, _: &mut Frame) {
+        egui::TopBottomPanel::top("main_menu").show(ctx, |ui| {
+            self.show_main_menu(ui);
+        });
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, self);
+    }
 }
