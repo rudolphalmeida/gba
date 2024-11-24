@@ -1,7 +1,10 @@
 use eframe::egui::{menu, Context};
 use eframe::{egui, Frame};
+use egui_notify::Toasts;
 use gba::gba::Gba;
 use std::path::PathBuf;
+use std::time::Duration;
+
 fn main() {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native("GBA Emulator", native_options, Box::new(|cc| Ok(Box::new(GbaUi::new(cc))))).unwrap()
@@ -12,6 +15,9 @@ struct GbaUi {
     #[serde(skip)]
     gba: Option<Gba>,
     bios_path: Option<PathBuf>,
+
+    #[serde(skip)]
+    toasts: Toasts,
 }
 
 impl GbaUi {
@@ -28,7 +34,7 @@ impl GbaUi {
             ui.menu_button("File", |ui| {
                 if ui.button("Open").clicked() {
                     if self.bios_path.is_none() {
-                        eprintln!("BIOS path needs to be selected");
+                        self.toasts.info("BIOS path needs to be selected").duration(Some(Duration::from_secs(5)));
                         return;
                     }
 
@@ -36,7 +42,7 @@ impl GbaUi {
                         self.gba = match Gba::new(path, self.bios_path.as_ref().unwrap()) {
                             Ok(gba) => Some(gba),
                             Err(e) => {
-                                eprintln!("{}", e);
+                                self.toasts.error(e).closable(true);
                                 None
                             }
                         };

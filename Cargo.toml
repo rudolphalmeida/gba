@@ -15,6 +15,7 @@ paste = "1.0.14"
 rfd = "0.15.1"
 thiserror = "1.0.59"
 serde = { version = "1.0.215", features = ["derive"] }
+egui-notify = "0.17.0"
 
 [profile.release]
 codegen-units = 1
