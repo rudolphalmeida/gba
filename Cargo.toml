@@ -16,6 +16,8 @@ rfd = "0.15.1"
 thiserror = "1.0.59"
 serde = { version = "1.0.215", features = ["derive"] }
 egui-notify = "0.17.0"
+circular-buffer = "0.1.9"
+egui_logger = "0.6.1"
 
 [profile.release]
 codegen-units = 1
