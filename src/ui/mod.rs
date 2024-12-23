@@ -31,11 +31,16 @@ impl GbaUi {
             ui.menu_button("File", |ui| {
                 if ui.button("Open").clicked() {
                     if self.bios_path.is_none() {
-                        self.toasts.info("BIOS path needs to be selected").duration(Some(Duration::from_secs(5)));
+                        self.toasts
+                            .info("BIOS path needs to be selected")
+                            .duration(Some(Duration::from_secs(5)));
                         return;
                     }
 
-                    if let Some(path) = rfd::FileDialog::new().add_filter("GBA Roms", &["gba"]).pick_file() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("GBA Roms", &["gba"])
+                        .pick_file()
+                    {
                         self.gba = match Gba::new(path, self.bios_path.as_ref().unwrap()) {
                             Ok(gba) => Some(gba),
                             Err(e) => {
@@ -53,7 +58,9 @@ impl GbaUi {
                 }
 
                 if ui.button("Select").clicked() {
-                    self.bios_path = rfd::FileDialog::new().add_filter("GBA BIOS", &["bin"]).pick_file();
+                    self.bios_path = rfd::FileDialog::new()
+                        .add_filter("GBA BIOS", &["bin"])
+                        .pick_file();
                 }
             });
         });
@@ -63,6 +70,10 @@ impl GbaUi {
 impl eframe::App for GbaUi {
     fn update(&mut self, ctx: &Context, _: &mut Frame) {
         self.toasts.show(ctx);
+
+        if let Some(gba) = self.gba.as_mut() {
+            gba.step();
+        }
 
         egui::TopBottomPanel::top("main_menu").show(ctx, |ui| {
             self.show_main_menu(ui);

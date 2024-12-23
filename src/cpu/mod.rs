@@ -2,6 +2,7 @@ use registers::RegisterFile;
 
 use crate::system_bus::SystemBus;
 
+pub mod opcodes;
 pub mod registers;
 
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
@@ -65,14 +66,13 @@ impl Arm7Cpu {
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::registers::PC;
     use crate::cpu::{Arm7Cpu, ExecutionMode, SystemMode};
 
     #[test]
     fn test_cpu_startup() {
         let cpu = Arm7Cpu::new();
 
-        assert_eq!(cpu.registers[PC], 0x00000000);
+        assert_eq!(cpu.registers.pc(), 0x00000000);
         assert_eq!(cpu.system_mode, SystemMode::Supervisor);
         assert_eq!(cpu.execution_mode, ExecutionMode::Arm);
     }
