@@ -1,9 +1,7 @@
-use ui::GbaUi;
+use crate::ui::GbaUi;
 
 mod ui;
 
-fn main() {
-    let native_options = eframe::NativeOptions::default();
-    eframe::run_native("GBA Emulator", native_options, Box::new(|cc| Ok(Box::new(GbaUi::new(cc))))).unwrap()
+fn main() -> iced::Result {
+    iced::run("GiBi Advance", GbaUi::update, GbaUi::view)
 }
-
