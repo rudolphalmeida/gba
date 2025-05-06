@@ -1,29 +1,75 @@
+use crate::ui::emulation_thread::{
+    emulation_thread, EmulationCommand, EmulationCtx, EmulatorUpdate,
+};
 use eframe::egui::{menu, Context};
 use eframe::{egui, Frame};
 use egui_notify::Toasts;
-use gba::gba::Gba;
 use std::path::PathBuf;
 use std::time::Duration;
 
+mod emulation_thread;
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct GbaUi {
-    #[serde(skip)]
-    gba: Option<Gba>,
     bios_path: Option<PathBuf>,
 
     #[serde(skip)]
     toasts: Toasts,
+
+    #[serde(skip)]
+    comm_ctx: Option<EmuCommCtx>,
+}
+
+struct EmuCommCtx {
+    emulation_thread: std::thread::JoinHandle<()>,
+    cmd_send: std::sync::mpsc::SyncSender<EmulationCommand>,
+    emu_recv: std::sync::mpsc::Receiver<EmulatorUpdate>,
+}
+
+impl EmuCommCtx {
+    pub fn new(emulation_ctx: EmulationCtx) -> Self {
+        let (cmd_send, cmd_recv) = std::sync::mpsc::sync_channel(0);
+        let (emu_send, emu_recv) = std::sync::mpsc::channel();
+
+        let emulation_thread = std::thread::spawn(move || {
+            emulation_thread(emulation_ctx, cmd_recv, emu_send);
+        });
+
+        EmuCommCtx {
+            emulation_thread,
+            cmd_send,
+            emu_recv,
+        }
+    }
 }
 
 impl GbaUi {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_logger::builder().init().unwrap();
 
+        let emulation_ctx = EmulationCtx::default();
+        let comm_ctx = EmuCommCtx::new(emulation_ctx);
+
         if let Some(storage) = cc.storage {
-            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            return Self {
+                comm_ctx: Some(comm_ctx),
+                ..eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+            };
         }
 
-        Self::default()
+        Self {
+            comm_ctx: Some(comm_ctx),
+            ..Self::default()
+        }
+    }
+
+    fn send_command(&mut self, command: EmulationCommand) {
+        self.comm_ctx
+            .as_mut()
+            .unwrap()
+            .cmd_send
+            .send(command)
+            .unwrap();
     }
 
     fn show_main_menu(&mut self, ui: &mut egui::Ui) {
@@ -41,13 +87,10 @@ impl GbaUi {
                         .add_filter("GBA Roms", &["gba"])
                         .pick_file()
                     {
-                        self.gba = match Gba::new(path, self.bios_path.as_ref().unwrap()) {
-                            Ok(gba) => Some(gba),
-                            Err(e) => {
-                                self.toasts.error(e).closable(true);
-                                None
-                            }
-                        };
+                        self.send_command(EmulationCommand::LoadRom {
+                            rom: path,
+                            bios: self.bios_path.clone().unwrap(),
+                        })
                     }
                 }
             });
@@ -69,11 +112,18 @@ impl GbaUi {
 
 impl eframe::App for GbaUi {
     fn update(&mut self, ctx: &Context, _: &mut Frame) {
-        self.toasts.show(ctx);
-
-        if let Some(gba) = self.gba.as_mut() {
-            gba.step();
+        while let Ok(update) = self.comm_ctx.as_mut().unwrap().emu_recv.try_recv() {
+            match update {
+                EmulatorUpdate::LoadError(e) => {
+                    self.toasts.error(e).closable(true);
+                }
+                EmulatorUpdate::LoadSuccess(s) => {
+                    self.toasts.success(s).closable(true);
+                }
+            }
         }
+
+        self.toasts.show(ctx);
 
         egui::TopBottomPanel::top("main_menu").show(ctx, |ui| {
             self.show_main_menu(ui);
@@ -86,5 +136,15 @@ impl eframe::App for GbaUi {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.send_command(EmulationCommand::Exit);
+        self.comm_ctx
+            .take()
+            .unwrap()
+            .emulation_thread
+            .join()
+            .unwrap();
     }
 }
