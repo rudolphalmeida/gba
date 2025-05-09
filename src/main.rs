@@ -1,13 +1,10 @@
-use ui::GbaUi;
+use crate::ui::AppState;
 
 mod ui;
 
-fn main() {
-    let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "GBA",
-        native_options,
-        Box::new(|cc| Ok(Box::new(GbaUi::new(cc)))),
-    )
-    .unwrap()
+fn main() -> iced::Result {
+    iced::application(AppState::default, AppState::update, AppState::view)
+        .theme(AppState::theme)
+        .centered()
+        .run()
 }
