@@ -9,12 +9,22 @@ use std::path::PathBuf;
 pub struct AppState {
     bios_path: Option<PathBuf>,
     rom_path: Option<PathBuf>,
+
+    page: Page,
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+enum Page {
+    #[default]
+    SelectFile,
+    PlayRom,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum AppMessage {
     ShowBiosPicker,
     ShowRomPicker,
+    PlayRom,
 }
 
 impl AppState {
@@ -26,10 +36,18 @@ impl AppState {
         match message {
             AppMessage::ShowBiosPicker => self.choose_bios_file(),
             AppMessage::ShowRomPicker => self.choose_rom_file(),
+            AppMessage::PlayRom => self.page = Page::PlayRom,
         }
     }
 
     pub fn view(&self) -> Element<AppMessage> {
+        match self.page {
+            Page::SelectFile => self.select_files_view(),
+            Page::PlayRom => text("TODO").into(),
+        }
+    }
+
+    pub fn select_files_view(&self) -> Element<AppMessage> {
         let load_bios_button = button("Load BIOS").on_press(AppMessage::ShowBiosPicker);
         let load_rom_button = button("Load ROM").on_press(AppMessage::ShowRomPicker);
 
@@ -45,13 +63,19 @@ impl AppState {
             text("Select ROM to get started")
         };
 
+        let mut play_rom_button = button("Play");
+        if self.rom_path.is_some() && self.bios_path.is_some() {
+            play_rom_button = play_rom_button.on_press(AppMessage::PlayRom);
+        }
+
         center_x(
             column![
-                text("GBA emulator"),
+                text("GBA emulator").size(36),
                 bios_path_display,
                 load_bios_button,
                 rom_path_display,
-                load_rom_button
+                load_rom_button,
+                play_rom_button
             ]
             .spacing(20),
         )
