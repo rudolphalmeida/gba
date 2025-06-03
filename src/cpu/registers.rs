@@ -57,9 +57,10 @@ impl RegisterFile {
         self.registers[15]
     }
 
-    pub fn get_and_increment_pc(&mut self, by: u32) -> u32 {
+    pub fn fetch_add_pc(&mut self, by: u32) -> u32 {
         let pc = &mut self.registers[15];
+        let res = *pc;
         *pc = pc.wrapping_add(by);
-        *pc
+        res
     }
 }

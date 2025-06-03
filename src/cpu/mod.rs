@@ -48,7 +48,7 @@ impl Arm7Cpu {
     }
 
     fn fetch_word(&mut self, bus: &mut SystemBus) -> u32 {
-        bus.read_word(self.registers.get_and_increment_pc(4))
+        bus.read_word(self.registers.fetch_add_pc(4))
     }
 
     pub fn step(&mut self, bus: &mut SystemBus) {
