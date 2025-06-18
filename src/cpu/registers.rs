@@ -31,19 +31,49 @@ pub struct RegisterFile {
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
 pub enum CpuState {
     #[default]
-    Arm,
-    Thumb,
+    Arm = 1 << 5,
+    Thumb = 0,
+}
+
+impl TryFrom<u32> for CpuState {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            x if x == CpuState::Arm as u32 => Ok(CpuState::Arm),
+            x if x == CpuState::Thumb as u32 => Ok(CpuState::Thumb),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
 pub enum CpuMode {
-    User,
-    Fiq,
+    User = 0b10000,
+    Fiq =  0b10001,
+    Irq = 0b10010,
     #[default]
-    Supervisor,
-    Abort,
-    Irq,
-    Undefined,
+    Supervisor = 0b10011,
+    Abort = 0b10111,
+    Undefined = 0b11011,
+    System = 0b11111,
+}
+
+impl TryFrom<u32> for CpuMode {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            x if x == CpuMode::User as u32 => Ok(CpuMode::User),
+            x if x == CpuMode::Fiq as u32 => Ok(CpuMode::Fiq),
+            x if x == CpuMode::Irq as u32 => Ok(CpuMode::Irq),
+            x if x == CpuMode::Supervisor as u32 => Ok(CpuMode::Supervisor),
+            x if x == CpuMode::Abort as u32 => Ok(CpuMode::Abort),
+            x if x == CpuMode::Undefined as u32 => Ok(CpuMode::Undefined),
+            x if x == CpuMode::System as u32 => Ok(CpuMode::System),
+            _ => Err(()),
+        }
+    }
 }
 
 pub enum CondFlag {
@@ -76,7 +106,7 @@ impl Default for RegisterFile {
             r13_und: Default::default(),
             r14_und: Default::default(),
             spsr_und: Default::default(),
-            cpsr: Default::default(),
+            cpsr: (CpuMode::default() as u32) | (CpuState::default() as u32),
             spsr: Default::default(),
         }
     }
@@ -95,10 +125,10 @@ impl RegisterFile {
     }
 
     pub fn state(&self) -> CpuState {
-        todo!("CPU state")
+        CpuState::try_from(self.cpsr & (CondFlag::State as u32)).unwrap()
     }
 
     pub fn mode(&self) -> CpuMode {
-        todo!("CPU mode")
+        CpuMode::try_from(self.cpsr & (CondFlag::ModeMask as u32)).unwrap()
     }
 }
