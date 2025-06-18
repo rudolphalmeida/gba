@@ -1,49 +1,27 @@
 use registers::RegisterFile;
-
+use crate::cpu::registers::{CpuMode, CpuState};
 use crate::system_bus::SystemBus;
 
 pub mod opcodes;
 pub mod registers;
 
-#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
-enum ExecutionMode {
-    #[default]
-    Arm,
-    Thumb,
-}
-
-#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
-enum SystemMode {
-    User,
-    Fiq,
-    #[default]
-    Supervisor,
-    Abort,
-    Irq,
-    Undefined,
-}
-
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Arm7Cpu {
     registers: RegisterFile,
-    system_mode: SystemMode,
-    execution_mode: ExecutionMode,
 }
 
 impl Arm7Cpu {
     pub fn new() -> Self {
         Self {
             registers: RegisterFile::default(),
-            system_mode: SystemMode::Supervisor,
-            execution_mode: ExecutionMode::Arm,
         }
     }
 
-    fn toggle_execution_mode(&mut self) {
+    fn toggle_cpu_state(&mut self) {
         todo!()
     }
 
-    fn switch_system_mode(&mut self, system_mode: SystemMode) {
+    fn switch_cpu_mode(&mut self, cpu_mode: CpuMode) {
         todo!()
     }
 
@@ -52,9 +30,9 @@ impl Arm7Cpu {
     }
 
     pub fn step(&mut self, bus: &mut SystemBus) {
-        match self.execution_mode {
-            ExecutionMode::Arm => self.execute_next_arm(bus),
-            ExecutionMode::Thumb => todo!(),
+        match self.registers.state() {
+            CpuState::Arm => self.execute_next_arm(bus),
+            CpuState::Thumb => todo!(),
         }
     }
 
@@ -66,14 +44,15 @@ impl Arm7Cpu {
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::{Arm7Cpu, ExecutionMode, SystemMode};
+    use crate::cpu::Arm7Cpu;
+    use crate::cpu::registers::{CpuMode, CpuState};
 
     #[test]
     fn test_cpu_startup() {
         let cpu = Arm7Cpu::new();
 
         assert_eq!(cpu.registers.pc(), 0x00000000);
-        assert_eq!(cpu.system_mode, SystemMode::Supervisor);
-        assert_eq!(cpu.execution_mode, ExecutionMode::Arm);
+        assert_eq!(cpu.registers.mode(), CpuMode::Supervisor);
+        assert_eq!(cpu.registers.state(), CpuState::Arm);
     }
 }

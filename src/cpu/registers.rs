@@ -28,6 +28,36 @@ pub struct RegisterFile {
     spsr: u32,
 }
 
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
+pub enum CpuState {
+    #[default]
+    Arm,
+    Thumb,
+}
+
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
+pub enum CpuMode {
+    User,
+    Fiq,
+    #[default]
+    Supervisor,
+    Abort,
+    Irq,
+    Undefined,
+}
+
+pub enum CondFlag {
+    Sign = 1 << 31,
+    Zero = 1 << 30,
+    Carry = 1 << 29,
+    Overflow = 1 << 28,
+
+    IrqDisable = 1 << 7,
+    FiqDisable = 1 << 6,
+    State = 1 << 5,
+    ModeMask = 0b11111,
+}
+
 impl Default for RegisterFile {
     fn default() -> Self {
         Self {
@@ -62,5 +92,13 @@ impl RegisterFile {
         let res = *pc;
         *pc = pc.wrapping_add(by);
         res
+    }
+
+    pub fn state(&self) -> CpuState {
+        todo!("CPU state")
+    }
+
+    pub fn mode(&self) -> CpuMode {
+        todo!("CPU mode")
     }
 }
