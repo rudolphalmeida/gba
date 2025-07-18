@@ -1,15 +1,18 @@
 #[allow(dead_code)]
 use crate::gamepak::Gamepak;
 
-/// The `SystemBus` is responsible for routing all the read/write signals to the proper
-/// mapped component for a particular address
-pub struct SystemBus {
+pub trait SystemBus {
+    fn read_word(&mut self, address: u32) -> u32;
+    fn write_word(&mut self, address: u32, data: u32);
+}
+
+pub struct Bus {
     gamepak: Gamepak,
     bios: Vec<u8>,
     bios_active: bool,
 }
 
-impl SystemBus {
+impl Bus {
     pub fn new(gamepak: Gamepak, bios: Vec<u8>) -> Self {
         Self {
             gamepak,
@@ -26,8 +29,10 @@ impl SystemBus {
             log::info!("Disabled BIOS");
         }
     }
+}
 
-    pub fn read_word(&mut self, address: u32) -> u32 {
+impl SystemBus for Bus {
+    fn read_word(&mut self, address: u32) -> u32 {
         let address = address as usize;
         match address {
             0x00000000..0x00004000 if self.bios_active => {
@@ -40,15 +45,15 @@ impl SystemBus {
         }
     }
 
-    pub fn write_word(&mut self, address: u32, data: u32) {
+    fn write_word(&mut self, address: u32, data: u32) {
         todo!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::gamepak::{Gamepak, GamePakHeader};
-    use crate::system_bus::SystemBus;
+    use crate::gamepak::{GamePakHeader, Gamepak};
+    use crate::system_bus::Bus;
 
     fn test_gamepak() -> Gamepak {
         let header = GamePakHeader {
@@ -64,7 +69,7 @@ mod tests {
 
     #[test]
     fn test_bus_startup() {
-        let bus = SystemBus::new(test_gamepak(), BIOS.to_vec());
+        let bus = Bus::new(test_gamepak(), BIOS.to_vec());
 
         assert!(bus.bios_active);
     }

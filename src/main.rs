@@ -9,7 +9,7 @@ fn main() {
     let mut gba = match Gba::new(args.rom, args.bios) {
         Ok(gba) => gba,
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             exit(-1);
         }
     };

@@ -2,30 +2,29 @@
 pub struct RegisterFile {
     /// Registers shared between the system and user states
     /// R0-R7 are shared across all states
-    registers: [u32; 16],
+    pub registers: [u32; 16],
 
     /// FIQ state R8-R14
-    fiq_registers: [u32; 7],
-    spsr_fiq: u32,
+    pub fiq_registers: [u32; 7],
+    pub spsr_fiq: u32,
 
-    r13_svc: u32,
-    r14_svc: u32,
-    spsr_svc: u32,
+    pub r13_svc: u32,
+    pub r14_svc: u32,
+    pub spsr_svc: u32,
 
-    r13_abt: u32,
-    r14_abt: u32,
-    spsr_abt: u32,
+    pub r13_abt: u32,
+    pub r14_abt: u32,
+    pub spsr_abt: u32,
 
-    r13_irq: u32,
-    r14_irq: u32,
-    spsr_irq: u32,
+    pub r13_irq: u32,
+    pub r14_irq: u32,
+    pub spsr_irq: u32,
 
-    r13_und: u32,
-    r14_und: u32,
-    spsr_und: u32,
+    pub r13_und: u32,
+    pub r14_und: u32,
+    pub spsr_und: u32,
 
-    cpsr: u32,
-    spsr: u32,
+    pub cpsr: u32,
 }
 
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
@@ -50,7 +49,7 @@ impl TryFrom<u32> for CpuState {
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
 pub enum CpuMode {
     User = 0b10000,
-    Fiq =  0b10001,
+    Fiq = 0b10001,
     Irq = 0b10010,
     #[default]
     Supervisor = 0b10011,
@@ -76,6 +75,7 @@ impl TryFrom<u32> for CpuMode {
     }
 }
 
+#[allow(clippy::enum_clike_unportable_variant)]
 pub enum CondFlag {
     Sign = 1 << 31,
     Zero = 1 << 30,
@@ -107,7 +107,6 @@ impl Default for RegisterFile {
             r14_und: Default::default(),
             spsr_und: Default::default(),
             cpsr: (CpuMode::default() as u32) | (CpuState::default() as u32),
-            spsr: Default::default(),
         }
     }
 }
