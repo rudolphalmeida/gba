@@ -30,8 +30,8 @@ pub struct RegisterFile {
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
 pub enum CpuState {
     #[default]
-    Arm = 1 << 5,
-    Thumb = 0,
+    Arm = 0,
+    Thumb = 1 << 5,
 }
 
 impl TryFrom<u32> for CpuState {
@@ -51,10 +51,10 @@ pub enum CpuMode {
     User = 0b10000,
     Fiq = 0b10001,
     Irq = 0b10010,
-    #[default]
     Supervisor = 0b10011,
     Abort = 0b10111,
     Undefined = 0b11011,
+    #[default]
     System = 0b11111,
 }
 
@@ -106,7 +106,7 @@ impl Default for RegisterFile {
             r13_und: Default::default(),
             r14_und: Default::default(),
             spsr_und: Default::default(),
-            cpsr: (CpuMode::default() as u32) | (CpuState::default() as u32),
+            cpsr: (0b11 << 6) | (CpuMode::default() as u32) | (CpuState::default() as u32),
         }
     }
 }
@@ -115,6 +115,8 @@ impl RegisterFile {
     pub fn pc(&self) -> u32 {
         self.registers[15]
     }
+
+    pub fn set_pc(&mut self, pc: u32) { self.registers[15] = pc; }
 
     pub fn fetch_add_pc(&mut self, by: u32) -> u32 {
         let pc = &mut self.registers[15];
