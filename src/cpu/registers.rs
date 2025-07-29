@@ -2,7 +2,7 @@
 pub struct RegisterFile {
     /// Registers shared between the system and user states
     /// R0-R7 are shared across all states
-    pub registers: [u32; 16],
+    pub user_bank: [u32; 16],
 
     /// FIQ state R8-R14
     pub fiq_registers: [u32; 7],
@@ -91,7 +91,7 @@ pub enum CondFlag {
 impl Default for RegisterFile {
     fn default() -> Self {
         Self {
-            registers: Default::default(),
+            user_bank: Default::default(),
             fiq_registers: Default::default(),
             spsr_fiq: Default::default(),
             r13_svc: Default::default(),
@@ -113,13 +113,61 @@ impl Default for RegisterFile {
 
 impl RegisterFile {
     pub fn pc(&self) -> u32 {
-        self.registers[15]
+        self.user_bank[15]
     }
 
-    pub fn set_pc(&mut self, pc: u32) { self.registers[15] = pc; }
+    pub fn set_pc(&mut self, pc: u32) { self.user_bank[15] = pc; }
+
+    pub fn r13(&self) -> u32 {
+        match self.mode() {
+            CpuMode::User => self.user_bank[13],
+            CpuMode::Fiq => self.fiq_registers[5],
+            CpuMode::Irq => self.r13_irq,
+            CpuMode::Supervisor => self.r13_svc,
+            CpuMode::Abort => self.r13_abt,
+            CpuMode::Undefined => self.r13_und,
+            CpuMode::System => self.user_bank[13],
+        }
+    }
+
+    pub fn set_r13(&mut self, value: u32) {
+        match self.mode() {
+            CpuMode::User => self.user_bank[13] = value,
+            CpuMode::Fiq => self.fiq_registers[5] = value,
+            CpuMode::Irq => self.r13_irq = value,
+            CpuMode::Supervisor => self.r13_svc = value,
+            CpuMode::Abort => self.r13_abt = value,
+            CpuMode::Undefined => self.r13_und = value,
+            CpuMode::System => self.user_bank[13] = value,
+        }
+    }
+
+    pub fn r14(&self) -> u32 {
+        match self.mode() {
+            CpuMode::User => self.user_bank[14],
+            CpuMode::Fiq => self.fiq_registers[6],
+            CpuMode::Irq => self.r14_irq,
+            CpuMode::Supervisor => self.r14_svc,
+            CpuMode::Abort => self.r14_abt,
+            CpuMode::Undefined => self.r14_und,
+            CpuMode::System => self.user_bank[14],
+        }
+    }
+
+    pub fn set_r14(&mut self, value: u32) {
+        match self.mode() {
+            CpuMode::User => self.user_bank[14] = value,
+            CpuMode::Fiq => self.fiq_registers[6] = value,
+            CpuMode::Irq => self.r14_irq = value,
+            CpuMode::Supervisor => self.r14_svc = value,
+            CpuMode::Abort => self.r14_abt = value,
+            CpuMode::Undefined => self.r14_und = value,
+            CpuMode::System => self.user_bank[14] = value,
+        }
+    }
 
     pub fn fetch_add_pc(&mut self, by: u32) -> u32 {
-        let pc = &mut self.registers[15];
+        let pc = &mut self.user_bank[15];
         let res = *pc;
         *pc = pc.wrapping_add(by);
         res
@@ -131,5 +179,21 @@ impl RegisterFile {
 
     pub fn mode(&self) -> CpuMode {
         CpuMode::try_from(self.cpsr & (CondFlag::ModeMask as u32)).unwrap()
+    }
+
+    pub fn sign(&self) -> bool {
+        self.cpsr & (CondFlag::Sign as u32) != 0
+    }
+
+    pub fn zero(&self) -> bool {
+        self.cpsr & (CondFlag::Zero as u32) != 0
+    }
+
+    pub fn carry(&self) -> bool {
+        self.cpsr & (CondFlag::Carry as u32) != 0
+    }
+
+    pub fn overflow(&self) -> bool {
+        self.cpsr & (CondFlag::Overflow as u32) != 0
     }
 }

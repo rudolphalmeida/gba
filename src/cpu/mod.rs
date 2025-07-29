@@ -2,7 +2,7 @@ use crate::cpu::opcodes::{
     check_condition, decode_arm_opcode, execute_b, execute_bl, execute_blx, ArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CpuMode, CpuState};
-use crate::system_bus::{SystemBus, ACCESS_CODE};
+use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 use registers::RegisterFile;
 
 pub mod opcodes;
@@ -42,6 +42,14 @@ impl Arm7Cpu {
         bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE)
     }
 
+    pub fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        self.pipeline[0] = bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE | ACCESS_NONSEQ);
+        self.pipeline[1] = bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE | ACCESS_SEQ);
+        self.next_access = ACCESS_CODE | ACCESS_SEQ;
+
+        // TODO: IRQ disable
+    }
+
     pub fn step<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         match self.registers.state() {
             CpuState::Arm => self.execute_next_arm(bus),
@@ -51,18 +59,19 @@ impl Arm7Cpu {
 
     fn execute_next_arm<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let execute_opcode = self.pipeline[0];
-        self.pipeline[0] = if check_condition(&self.registers, self.pipeline[1]) {
-            self.pipeline[1]
-        } else {
-            0x00
-        }; // TODO: Decode condition check fail
 
-        // PC will lead by 4 in every opcode execution due to this fetch.
-        // Since execution happens in parallel actual PC for execution is `PC - 4`
-        self.pipeline[1] = self.fetch_word(bus);
+        self.registers.set_pc(self.registers.pc() & !1);
+
+        self.pipeline[0] = self.pipeline[1];
+        self.pipeline[1] = bus.read_word(self.registers.pc(), self.next_access);
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
-            self.execute_arm_opcode(opcode, bus);
+            if check_condition(&self.registers, execute_opcode) {
+                self.execute_arm_opcode(opcode, bus);
+            } else {
+                bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE);
+                self.next_access = ACCESS_CODE | ACCESS_SEQ;
+            }
         } else {
             eprintln!("Failed to decode opcode {execute_opcode:#08X}");
         }
@@ -70,9 +79,9 @@ impl Arm7Cpu {
 
     fn execute_arm_opcode<BusType: SystemBus>(&mut self, opcode: ArmOpcode, bus: &mut BusType) {
         match opcode {
-            ArmOpcode::B { offset } => execute_b(&mut self.registers, bus, offset),
-            ArmOpcode::BL { offset } => execute_bl(&mut self.registers, bus, offset),
-            ArmOpcode::BLX { offset } => execute_blx(&mut self.registers, bus, offset),
+            ArmOpcode::B { offset } => execute_b(self, bus, offset),
+            ArmOpcode::BL { offset } => execute_bl(self, bus, offset),
+            ArmOpcode::BLX { offset } => execute_blx(self, bus, offset),
         }
     }
 }
@@ -176,7 +185,7 @@ mod tests {
 
     fn cpu_with_state(state: &TestCpuState) -> Arm7Cpu {
         let registers = RegisterFile {
-            registers: state.r,
+            user_bank: state.r,
             fiq_registers: state.r_fiq,
             spsr_fiq: state.spsr[0],
             r13_svc: state.r_svc[0],
@@ -236,26 +245,40 @@ mod tests {
         state: &TestCpuState,
         failures: &mut Vec<(u32, OpcodeExecFailure)>,
     ) {
-        for i in 0..16 {
-            if cpu.registers.registers[i] != state.r[i] {
+        for (i, (expected, actual)) in state
+            .r
+            .iter()
+            .zip(cpu.registers.user_bank.iter())
+            .enumerate()
+        {
+            if expected != actual {
                 failures.push((
                     opcode,
                     OpcodeExecFailure::RegisterMismatch {
-                        expected: state.r[i],
-                        actual: cpu.registers.registers[i],
-                        register: if i == 15 { "PC".to_string() } else { format!("R{}", i + 1) },
+                        expected: *expected,
+                        actual: *actual,
+                        register: if i == 15 {
+                            "PC".to_string()
+                        } else {
+                            format!("R{i}")
+                        },
                     },
                 ));
             }
         }
 
-        for i in 0..7 {
-            if cpu.registers.fiq_registers[i] != state.r_fiq[i] {
+        for (i, (expected, actual)) in state
+            .r_fiq
+            .iter()
+            .zip(cpu.registers.fiq_registers.iter())
+            .enumerate()
+        {
+            if expected != actual {
                 failures.push((
                     opcode,
                     OpcodeExecFailure::RegisterMismatch {
-                        expected: state.r[i],
-                        actual: cpu.registers.registers[i],
+                        expected: *expected,
+                        actual: *actual,
                         register: format!("R_fiq {}", i + 8),
                     },
                 ));
@@ -464,13 +487,13 @@ mod tests {
         for test_case in test_state.iter() {
             let mut bus = TransactionSystemBus {
                 test_state: test_case,
-                opcode: test_case.initial.pipeline[0],
+                opcode: test_case.opcode,
             };
             let mut cpu = cpu_with_state(&test_case.initial);
 
             cpu.execute_next_arm(&mut bus);
             compare_cpu_with_state(
-                test_case.initial.pipeline[0],
+                test_case.opcode,
                 &cpu,
                 &test_case.r#final,
                 &mut opcode_failures,
@@ -479,7 +502,7 @@ mod tests {
 
         if opcode_failures.len() > 1 {
             for (opcode, failure) in opcode_failures.iter() {
-                eprintln!("Opcode {opcode:#010X} failed with {failure:?}");
+                eprintln!("Opcode {opcode} failed with {failure:?}");
             }
         }
 
