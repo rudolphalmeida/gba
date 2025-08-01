@@ -10,6 +10,9 @@ pub const ACCESS_LOCK: u8 = 8;
 pub trait SystemBus {
     fn read_word(&mut self, address: u32, access: u8) -> u32;
     fn write_word(&mut self, address: u32, data: u32, access: u8);
+
+    fn read_half_word(&mut self, address: u32, access: u8) -> u16;
+    fn write_half_word(&mut self, address: u32, data: u16, access: u8);
 }
 
 pub struct Bus {
@@ -38,10 +41,11 @@ impl Bus {
 }
 
 impl SystemBus for Bus {
-    fn read_word(&mut self, address: u32, _access: u8) -> u32 {
-        let address = address as usize;
+    fn read_word(&mut self, mut address: u32, _access: u8) -> u32 {
+        address &= !3;
         match address {
             0x00000000..0x00004000 if self.bios_active => {
+                let address = address as usize;
                 u32::from_le_bytes(self.bios[address..address + 4].try_into().unwrap())
             }
             _ => todo!(
@@ -52,6 +56,15 @@ impl SystemBus for Bus {
     }
 
     fn write_word(&mut self, address: u32, data: u32, _access: u8) {
+        todo!()
+    }
+
+    fn read_half_word(&mut self, address: u32, access: u8) -> u16 {
+        // address &= !1;
+        todo!()
+    }
+
+    fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
         todo!()
     }
 }

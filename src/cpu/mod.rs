@@ -1,7 +1,5 @@
-use crate::cpu::opcodes::{
-    check_condition, decode_arm_opcode, execute_b, execute_bl, execute_blx, ArmOpcode, Opcode,
-};
-use crate::cpu::registers::{CpuMode, CpuState};
+use crate::cpu::opcodes::{check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, ArmOpcode, Opcode};
+use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 use registers::RegisterFile;
 
@@ -31,7 +29,7 @@ impl Arm7Cpu {
     }
 
     fn toggle_cpu_state(&mut self) {
-        todo!()
+        self.registers.cpsr ^= CondFlag::State as u32;
     }
 
     fn switch_cpu_mode(&mut self, cpu_mode: CpuMode) {
@@ -39,12 +37,25 @@ impl Arm7Cpu {
     }
 
     fn fetch_word<BusType: SystemBus>(&mut self, bus: &mut BusType) -> u32 {
-        bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE)
+        bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE)
     }
 
-    pub fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
-        self.pipeline[0] = bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE | ACCESS_NONSEQ);
-        self.pipeline[1] = bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE | ACCESS_SEQ);
+    fn reload_pipeline<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        match self.registers.state() {
+            CpuState::Arm => self.reload_pipeline32(bus),
+            CpuState::Thumb => self.reload_pipeline16(bus),
+        }
+    }
+
+    fn reload_pipeline16<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        self.pipeline[0] = bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32;
+        self.pipeline[1] = bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32;
+        self.next_access = ACCESS_CODE | ACCESS_SEQ;
+    }
+
+    fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        self.pipeline[0] = bus.read_word(self.registers.get_and_incr_pc(4), self.next_access);
+        self.pipeline[1] = bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ);
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
 
         // TODO: IRQ disable
@@ -60,16 +71,16 @@ impl Arm7Cpu {
     fn execute_next_arm<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let execute_opcode = self.pipeline[0];
 
-        self.registers.set_pc(self.registers.pc() & !1);
+        self.registers[PC_IDX] &= !1;
 
         self.pipeline[0] = self.pipeline[1];
-        self.pipeline[1] = bus.read_word(self.registers.pc(), self.next_access);
+        self.pipeline[1] = bus.read_word(self.registers[PC_IDX], self.next_access);
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
             if check_condition(&self.registers, execute_opcode) {
                 self.execute_arm_opcode(opcode, bus);
             } else {
-                bus.read_word(self.registers.fetch_add_pc(4), ACCESS_CODE);
+                bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE);
                 self.next_access = ACCESS_CODE | ACCESS_SEQ;
             }
         } else {
@@ -81,25 +92,26 @@ impl Arm7Cpu {
         match opcode {
             ArmOpcode::B { offset } => execute_b(self, bus, offset),
             ArmOpcode::BL { offset } => execute_bl(self, bus, offset),
-            ArmOpcode::BLX { offset } => execute_blx(self, bus, offset),
+            ArmOpcode::BX { register_idx } => execute_arm_to_thumb_bx(self, bus, register_idx as usize),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::registers::{CpuMode, CpuState, RegisterFile};
+    use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
     use crate::system_bus::{SystemBus, ACCESS_CODE};
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fs::File;
+    use test_case::test_case;
 
     #[test]
     fn test_cpu_startup() {
         let cpu = Arm7Cpu::new();
 
-        assert_eq!(cpu.registers.pc(), 0x00000000);
+        assert_eq!(cpu.registers[PC_IDX], 0x00000000);
         assert_eq!(cpu.registers.mode(), CpuMode::System);
         assert_eq!(cpu.registers.state(), CpuState::Arm);
         assert_eq!(cpu.registers.cpsr, 0x000000DF); // IRQ and FIQ disabled
@@ -141,17 +153,30 @@ mod tests {
     struct TransactionSystemBus<'a> {
         test_state: &'a TestState,
         opcode: u32,
+        next_index: usize,
+    }
+
+    impl<'a> TransactionSystemBus<'a> {
+        fn find_transaction_for_addr(&mut self, address: u32) -> Option<&Transaction> {
+            if self.next_index >= self.test_state.transactions.len() {
+                None
+            } else {
+                let transaction = &self.test_state.transactions[self.next_index];
+                if transaction.addr == address {
+                    self.next_index += 1;
+                    Some(transaction)
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     impl<'a> SystemBus for TransactionSystemBus<'a> {
-        fn read_word(&mut self, address: u32, access: u8) -> u32 {
+        fn read_word(&mut self, mut address: u32, access: u8) -> u32 {
+            address &= !3;
             if access & ACCESS_CODE != ACCESS_CODE {
-                let mut transactions = self
-                    .test_state
-                    .transactions
-                    .iter()
-                    .filter(|t| t.addr == address);
-                return if let Some(transaction) = transactions.next() {
+                return if let Some(transaction) = self.find_transaction_for_addr(address) {
                     transaction.data
                 } else {
                     address
@@ -165,6 +190,26 @@ mod tests {
         }
 
         fn write_word(&mut self, address: u32, data: u32, _access: u8) {
+            todo!()
+        }
+
+        fn read_half_word(&mut self, mut address: u32, access: u8) -> u16 {
+            address &= !1;
+            if access & ACCESS_CODE != ACCESS_CODE {
+                return if let Some(transaction) = self.find_transaction_for_addr(address) {
+                    transaction.data as u16
+                } else {
+                    address as u16
+                };
+            }
+            if address == self.test_state.base_addr {
+                self.test_state.opcode as u16
+            } else {
+                address as u16
+            }
+        }
+
+        fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
             todo!()
         }
     }
@@ -478,9 +523,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_arm_b_bl() {
-        let test_state = read_test_data("arm_b_bl");
+    #[test_case("arm_b_bl")]
+    #[test_case("arm_bx")]
+    fn test_arm_opcode(name: &'static str) {
+        let test_state = read_test_data(name);
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 
@@ -488,6 +534,7 @@ mod tests {
             let mut bus = TransactionSystemBus {
                 test_state: test_case,
                 opcode: test_case.opcode,
+                next_index: 0,
             };
             let mut cpu = cpu_with_state(&test_case.initial);
 

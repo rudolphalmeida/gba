@@ -1,3 +1,5 @@
+pub const PC_IDX: usize = 15;
+
 #[derive(Debug, Copy, Clone)]
 pub struct RegisterFile {
     /// Registers shared between the system and user states
@@ -62,7 +64,7 @@ impl TryFrom<u32> for CpuMode {
     type Error = ();
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
+        match value & 0x1F {
             x if x == CpuMode::User as u32 => Ok(CpuMode::User),
             x if x == CpuMode::Fiq as u32 => Ok(CpuMode::Fiq),
             x if x == CpuMode::Irq as u32 => Ok(CpuMode::Irq),
@@ -112,62 +114,8 @@ impl Default for RegisterFile {
 }
 
 impl RegisterFile {
-    pub fn pc(&self) -> u32 {
-        self.user_bank[15]
-    }
-
-    pub fn set_pc(&mut self, pc: u32) { self.user_bank[15] = pc; }
-
-    pub fn r13(&self) -> u32 {
-        match self.mode() {
-            CpuMode::User => self.user_bank[13],
-            CpuMode::Fiq => self.fiq_registers[5],
-            CpuMode::Irq => self.r13_irq,
-            CpuMode::Supervisor => self.r13_svc,
-            CpuMode::Abort => self.r13_abt,
-            CpuMode::Undefined => self.r13_und,
-            CpuMode::System => self.user_bank[13],
-        }
-    }
-
-    pub fn set_r13(&mut self, value: u32) {
-        match self.mode() {
-            CpuMode::User => self.user_bank[13] = value,
-            CpuMode::Fiq => self.fiq_registers[5] = value,
-            CpuMode::Irq => self.r13_irq = value,
-            CpuMode::Supervisor => self.r13_svc = value,
-            CpuMode::Abort => self.r13_abt = value,
-            CpuMode::Undefined => self.r13_und = value,
-            CpuMode::System => self.user_bank[13] = value,
-        }
-    }
-
-    pub fn r14(&self) -> u32 {
-        match self.mode() {
-            CpuMode::User => self.user_bank[14],
-            CpuMode::Fiq => self.fiq_registers[6],
-            CpuMode::Irq => self.r14_irq,
-            CpuMode::Supervisor => self.r14_svc,
-            CpuMode::Abort => self.r14_abt,
-            CpuMode::Undefined => self.r14_und,
-            CpuMode::System => self.user_bank[14],
-        }
-    }
-
-    pub fn set_r14(&mut self, value: u32) {
-        match self.mode() {
-            CpuMode::User => self.user_bank[14] = value,
-            CpuMode::Fiq => self.fiq_registers[6] = value,
-            CpuMode::Irq => self.r14_irq = value,
-            CpuMode::Supervisor => self.r14_svc = value,
-            CpuMode::Abort => self.r14_abt = value,
-            CpuMode::Undefined => self.r14_und = value,
-            CpuMode::System => self.user_bank[14] = value,
-        }
-    }
-
-    pub fn fetch_add_pc(&mut self, by: u32) -> u32 {
-        let pc = &mut self.user_bank[15];
+    pub fn get_and_incr_pc(&mut self, by: u32) -> u32 {
+        let pc = &mut self.user_bank[PC_IDX];
         let res = *pc;
         *pc = pc.wrapping_add(by);
         res
@@ -195,5 +143,54 @@ impl RegisterFile {
 
     pub fn overflow(&self) -> bool {
         self.cpsr & (CondFlag::Overflow as u32) != 0
+    }
+}
+
+impl std::ops::Index<usize> for RegisterFile {
+    type Output = u32;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match self.mode() {
+            CpuMode::User => &self.user_bank[index],
+            CpuMode::Fiq if (8..=14).contains(&index) => &self.fiq_registers[index - 8],
+            CpuMode::Fiq => &self.user_bank[index],
+            CpuMode::Irq if index == 13 => &self.r13_irq,
+            CpuMode::Irq if index == 14 => &self.r14_irq,
+            CpuMode::Irq => &self.user_bank[index],
+            CpuMode::Supervisor if index == 13 => &self.r13_svc,
+            CpuMode::Supervisor if index == 14 => &self.r14_svc,
+            CpuMode::Supervisor => &self.user_bank[index],
+            CpuMode::Abort if index == 13 => &self.r13_abt,
+            CpuMode::Abort if index == 14 => &self.r14_abt,
+            CpuMode::Abort => &self.user_bank[index],
+            CpuMode::Undefined if index == 13 => &self.r13_und,
+            CpuMode::Undefined if index == 14 => &self.r14_und,
+            CpuMode::Undefined => &self.user_bank[index],
+            CpuMode::System => &self.user_bank[index],
+        }
+    }
+}
+
+impl std::ops::IndexMut<usize> for RegisterFile {
+
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match self.mode() {
+            CpuMode::User => &mut self.user_bank[index],
+            CpuMode::Fiq if (8..=14).contains(&index) => &mut self.fiq_registers[index - 8],
+            CpuMode::Fiq => &mut self.user_bank[index],
+            CpuMode::Irq if index == 13 => &mut self.r13_irq,
+            CpuMode::Irq if index == 14 => &mut self.r14_irq,
+            CpuMode::Irq => &mut self.user_bank[index],
+            CpuMode::Supervisor if index == 13 => &mut self.r13_svc,
+            CpuMode::Supervisor if index == 14 => &mut self.r14_svc,
+            CpuMode::Supervisor => &mut self.user_bank[index],
+            CpuMode::Abort if index == 13 => &mut self.r13_abt,
+            CpuMode::Abort if index == 14 => &mut self.r14_abt,
+            CpuMode::Abort => &mut self.user_bank[index],
+            CpuMode::Undefined if index == 13 => &mut self.r13_und,
+            CpuMode::Undefined if index == 14 => &mut self.r14_und,
+            CpuMode::Undefined => &mut self.user_bank[index],
+            CpuMode::System => &mut self.user_bank[index],
+        }
     }
 }
