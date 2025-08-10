@@ -1,6 +1,6 @@
-use crate::cpu::opcodes::{check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, ArmOpcode, Opcode};
+use crate::cpu::opcodes::{check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, execute_data_processing, ArmOpcode, Opcode};
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
+use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use registers::RegisterFile;
 
 pub mod opcodes;
@@ -93,6 +93,7 @@ impl Arm7Cpu {
             ArmOpcode::B { offset } => execute_b(self, bus, offset),
             ArmOpcode::BL { offset } => execute_bl(self, bus, offset),
             ArmOpcode::BX { register_idx } => execute_arm_to_thumb_bx(self, bus, register_idx as usize),
+            ArmOpcode::DataProcessing { sub_opcode, rd, rn, operand } => execute_data_processing(self, bus, sub_opcode, rd, rn, operand),
         }
     }
 }
@@ -525,6 +526,7 @@ mod tests {
 
     #[test_case("arm_b_bl")]
     #[test_case("arm_bx")]
+    #[test_case("arm_data_proc_immediate")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -549,7 +551,7 @@ mod tests {
 
         if opcode_failures.len() > 1 {
             for (opcode, failure) in opcode_failures.iter() {
-                eprintln!("Opcode {opcode} failed with {failure:?}");
+                eprintln!("Opcode {opcode} ({opcode:#010X}) failed with {failure:?}");
             }
         }
 
