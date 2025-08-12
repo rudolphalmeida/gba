@@ -2,6 +2,8 @@ use crate::cpu::registers::{CpuState, RegisterFile, PC_IDX};
 use crate::cpu::Arm7Cpu;
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 
+use super::registers::{CondFlag, CpuMode};
+
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     if let Some(decoded_opcode) = try_decode_b_bl(opcode) {
         return Some(Opcode::Arm(decoded_opcode));
@@ -94,10 +96,11 @@ pub enum ArmOpcode {
 
     // Data processing group
     DataProcessing {
-        sub_opcode: DataProcessingOpcode,
         rd: usize,
         rn: usize,
         operand: u32,
+        sub_opcode: DataProcessingOpcode,
+        set_flags: bool,
     },
 }
 
@@ -180,6 +183,7 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
     if (0x8..=0xF).contains(&sub_opcode) && (opcode & (1 << 20) != (1 << 20)) {
         return None;
     }
+    let set_flags = opcode & (1 << 20) == (1 << 20);
 
     // First operand register must be *0000* for MOV and MVN
     if (sub_opcode == 0xD || sub_opcode == 0xF) && (opcode & (0b1111 << 16) != 0) {
@@ -202,17 +206,17 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
 
     let is_immediate = opcode & (1 << 25) != 0;
     if is_immediate {
-        let nn = opcode as u8 & 0xFF;
+        let nn = opcode & 0xFF;
         // Shifted in jumps of 2 so 7 instead of 8 to keep LSB 0
-        let shift = ((opcode & 0xF00) >> 8) as u8;
-
-        let operand = nn.rotate_right(shift);
+        let shift = (opcode & 0xF00) >> 7;
+        let operand = ror(nn, shift);
 
         return Some(ArmOpcode::DataProcessing {
             sub_opcode,
             operand,
             rd,
             rn,
+            set_flags,
         });
     } else {
         // Register
@@ -222,6 +226,22 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
     None
 }
 
+fn ror(value: u32, amount: u32) -> u32 {
+    //! Rotate Right
+
+    // FIXME
+    value.rotate_right(amount)
+}
+
+fn rrx(value: u32, amount: u32, extension: bool) -> u32 {
+    //! Rotate right extended. The extension is used as the 33rd bit when shifting
+    //! in from the right. Some of the possible values for `extension` are:
+    //! - `RegisterFile::carry()`
+
+    // FIXME
+    value
+}
+
 pub fn execute_data_processing<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
@@ -229,32 +249,146 @@ pub fn execute_data_processing<BusType: SystemBus>(
     rd: usize,
     rn: usize,
     operand: u32,
+    set_flags: bool,
 ) {
     let operation = match sub_opcode {
         DataProcessingOpcode::AND => execute_and,
-        DataProcessingOpcode::EOR => execute_and,
-        DataProcessingOpcode::SUB => execute_and,
-        DataProcessingOpcode::RSB => execute_and,
-        DataProcessingOpcode::ADD => execute_and,
-        DataProcessingOpcode::ADC => execute_and,
-        DataProcessingOpcode::SBC => execute_and,
-        DataProcessingOpcode::RSC => execute_and,
-        DataProcessingOpcode::TST => execute_and,
-        DataProcessingOpcode::TEQ => execute_and,
-        DataProcessingOpcode::CMP => execute_and,
-        DataProcessingOpcode::CMN => execute_and,
-        DataProcessingOpcode::ORR => execute_and,
-        DataProcessingOpcode::MOV => execute_and,
-        DataProcessingOpcode::BIC => execute_and,
-        DataProcessingOpcode::MVN => execute_and,
+        DataProcessingOpcode::EOR => execute_eor,
+        DataProcessingOpcode::SUB => execute_sub,
+        DataProcessingOpcode::RSB => execute_rsb,
+        DataProcessingOpcode::ADD => execute_add,
+        DataProcessingOpcode::ADC => execute_adc,
+        DataProcessingOpcode::SBC => execute_sbc,
+        DataProcessingOpcode::RSC => execute_rsc,
+        DataProcessingOpcode::TST => execute_tst,
+        DataProcessingOpcode::TEQ => execute_teq,
+        DataProcessingOpcode::CMP => execute_cmp,
+        DataProcessingOpcode::CMN => execute_cmn,
+        DataProcessingOpcode::ORR => execute_orr,
+        DataProcessingOpcode::MOV => execute_mov,
+        DataProcessingOpcode::BIC => execute_bic,
+        DataProcessingOpcode::MVN => execute_mvn,
     };
-    operation(cpu, rd, rn, operand);
+    let (result, carry) = operation(cpu, rd, rn, operand);
 
     if rd == PC_IDX {
+        if set_flags {
+            // TODO: Should not be used in user mode. (What if it is?)
+            cpu.registers.cpsr = cpu.registers.spsr_moded();
+            cpu.switch_cpu_mode(CpuMode::User);
+            cpu.registers[PC_IDX] = result;
+        }
         cpu.reload_pipeline(bus);
+        return;
+    }
+
+    if !set_flags {
+        return;
+    }
+
+    match sub_opcode {
+        DataProcessingOpcode::AND
+        | DataProcessingOpcode::EOR
+        | DataProcessingOpcode::TST
+        | DataProcessingOpcode::TEQ
+        | DataProcessingOpcode::ORR
+        | DataProcessingOpcode::MOV
+        | DataProcessingOpcode::BIC
+        | DataProcessingOpcode::MVN => {
+            cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
+            cpu.registers
+                .update_flag(CondFlag::Sign, result & (1 << 31) != (1 << 31));
+        }
+        _ => {
+            cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
+            cpu.registers
+                .update_flag(CondFlag::Sign, result & (1 << 31) != (1 << 31));
+            cpu.registers.update_flag(CondFlag::Carry, carry);
+        }
     }
 }
 
-fn execute_and(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) {
+fn execute_and(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
     cpu.registers[rd] = cpu.registers[rn] & operand;
+    (cpu.registers[rd], false)
+}
+
+fn execute_eor(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rd] = cpu.registers[rn] ^ operand;
+    (cpu.registers[rd], false)
+}
+
+fn execute_sub(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    let (result, borrow) = cpu.registers[rn].overflowing_sub(operand);
+    cpu.registers[rd] = result;
+    (result, borrow)
+}
+
+fn execute_rsb(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    let (result, borrow) = operand.overflowing_sub(cpu.registers[rn]);
+    cpu.registers[rd] = result;
+    (result, borrow)
+}
+
+fn execute_add(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    let (result, carry) = cpu.registers[rn].overflowing_add(operand);
+    cpu.registers[rd] = result;
+    (result, carry)
+}
+
+fn execute_adc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    let (result, carry1) = cpu.registers[rn].overflowing_add(operand);
+    let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
+    cpu.registers[rd] = result;
+    (result, carry1 || carry2)
+}
+
+fn execute_sbc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    let (result, carry1) = cpu.registers[rn].overflowing_sub(operand);
+    let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
+    cpu.registers[rd] = result;
+    (result, carry1 || carry2)
+}
+
+fn execute_rsc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    let (result, carry1) = operand.overflowing_add(cpu.registers[rn]);
+    let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
+    cpu.registers[rd] = result;
+    (result, carry1 || carry2)
+}
+
+fn execute_tst(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    (cpu.registers[rn] & operand, false)
+}
+
+fn execute_teq(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    (cpu.registers[rn] ^ operand, false)
+}
+
+fn execute_cmp(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rn].overflowing_sub(operand)
+}
+
+fn execute_cmn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rn].overflowing_add(operand)
+}
+
+fn execute_orr(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rd] = cpu.registers[rn] | operand;
+    (cpu.registers[rd], false)
+}
+
+fn execute_mov(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rd] = operand;
+    (cpu.registers[rd], false)
+}
+
+fn execute_bic(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rd] = cpu.registers[rn] & !operand;
+    (cpu.registers[rd], false)
+}
+
+fn execute_mvn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+    cpu.registers[rd] = !operand;
+    (cpu.registers[rd], false)
 }

@@ -1,4 +1,7 @@
-use crate::cpu::opcodes::{check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, execute_data_processing, ArmOpcode, Opcode};
+use crate::cpu::opcodes::{
+    check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
+    execute_data_processing, ArmOpcode, Opcode,
+};
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use registers::RegisterFile;
@@ -33,7 +36,8 @@ impl Arm7Cpu {
     }
 
     fn switch_cpu_mode(&mut self, cpu_mode: CpuMode) {
-        todo!()
+        self.registers.cpsr =
+            (self.registers.cpsr & !(CondFlag::ModeMask as u32)) | (cpu_mode as u32);
     }
 
     fn fetch_word<BusType: SystemBus>(&mut self, bus: &mut BusType) -> u32 {
@@ -48,14 +52,17 @@ impl Arm7Cpu {
     }
 
     fn reload_pipeline16<BusType: SystemBus>(&mut self, bus: &mut BusType) {
-        self.pipeline[0] = bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32;
-        self.pipeline[1] = bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32;
+        self.pipeline[0] =
+            bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32;
+        self.pipeline[1] =
+            bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32;
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
     }
 
     fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         self.pipeline[0] = bus.read_word(self.registers.get_and_incr_pc(4), self.next_access);
-        self.pipeline[1] = bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ);
+        self.pipeline[1] =
+            bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ);
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
 
         // TODO: IRQ disable
@@ -92,8 +99,16 @@ impl Arm7Cpu {
         match opcode {
             ArmOpcode::B { offset } => execute_b(self, bus, offset),
             ArmOpcode::BL { offset } => execute_bl(self, bus, offset),
-            ArmOpcode::BX { register_idx } => execute_arm_to_thumb_bx(self, bus, register_idx as usize),
-            ArmOpcode::DataProcessing { sub_opcode, rd, rn, operand } => execute_data_processing(self, bus, sub_opcode, rd, rn, operand),
+            ArmOpcode::BX { register_idx } => {
+                execute_arm_to_thumb_bx(self, bus, register_idx as usize)
+            }
+            ArmOpcode::DataProcessing {
+                sub_opcode,
+                rd,
+                rn,
+                operand,
+                set_flags,
+            } => execute_data_processing(self, bus, sub_opcode, rd, rn, operand, set_flags),
         }
     }
 }
@@ -116,6 +131,30 @@ mod tests {
         assert_eq!(cpu.registers.mode(), CpuMode::System);
         assert_eq!(cpu.registers.state(), CpuState::Arm);
         assert_eq!(cpu.registers.cpsr, 0x000000DF); // IRQ and FIQ disabled
+    }
+
+    #[test]
+    fn test_cpu_mode_change() {
+        let mut cpu = Arm7Cpu::new();
+        assert_eq!(cpu.registers.mode(), CpuMode::System);
+
+        cpu.switch_cpu_mode(CpuMode::Irq);
+        assert_eq!(cpu.registers.mode(), CpuMode::Irq);
+
+        cpu.switch_cpu_mode(CpuMode::Abort);
+        assert_eq!(cpu.registers.mode(), CpuMode::Abort);
+
+        cpu.switch_cpu_mode(CpuMode::Supervisor);
+        assert_eq!(cpu.registers.mode(), CpuMode::Supervisor);
+
+        cpu.switch_cpu_mode(CpuMode::Fiq);
+        assert_eq!(cpu.registers.mode(), CpuMode::Fiq);
+
+        cpu.switch_cpu_mode(CpuMode::Undefined);
+        assert_eq!(cpu.registers.mode(), CpuMode::Undefined);
+
+        cpu.switch_cpu_mode(CpuMode::User);
+        assert_eq!(cpu.registers.mode(), CpuMode::User);
     }
 
     // Opcode tests

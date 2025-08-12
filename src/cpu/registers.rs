@@ -3,7 +3,7 @@ pub const PC_IDX: usize = 15;
 #[derive(Debug, Copy, Clone)]
 pub struct RegisterFile {
     /// Registers shared between the system and user states
-    /// R0-R7 are shared across all states
+    /// R0-R7 and R15 are shared across all states
     pub user_bank: [u32; 16],
 
     /// FIQ state R8-R14
@@ -129,6 +129,18 @@ impl RegisterFile {
         CpuMode::try_from(self.cpsr & (CondFlag::ModeMask as u32)).unwrap()
     }
 
+    pub fn spsr_moded(&self) -> u32 {
+        match self.mode() {
+            CpuMode::User => todo!(),
+            CpuMode::Fiq => self.spsr_fiq,
+            CpuMode::Irq => self.spsr_irq,
+            CpuMode::Supervisor => self.spsr_svc,
+            CpuMode::Abort => self.spsr_abt,
+            CpuMode::Undefined => self.spsr_und,
+            CpuMode::System => todo!(),
+        }
+    }
+
     pub fn sign(&self) -> bool {
         self.cpsr & (CondFlag::Sign as u32) != 0
     }
@@ -143,6 +155,14 @@ impl RegisterFile {
 
     pub fn overflow(&self) -> bool {
         self.cpsr & (CondFlag::Overflow as u32) != 0
+    }
+
+    pub fn update_flag(&mut self, flag: CondFlag, value: bool) {
+        if value {
+            self.cpsr = self.cpsr | (flag as u32);
+        } else {
+            self.cpsr = self.cpsr & !(flag as u32);
+        }
     }
 }
 
@@ -172,7 +192,6 @@ impl std::ops::Index<usize> for RegisterFile {
 }
 
 impl std::ops::IndexMut<usize> for RegisterFile {
-
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         match self.mode() {
             CpuMode::User => &mut self.user_bank[index],
