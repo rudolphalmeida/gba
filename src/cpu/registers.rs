@@ -131,13 +131,13 @@ impl RegisterFile {
 
     pub fn spsr_moded(&self) -> u32 {
         match self.mode() {
-            CpuMode::User => todo!(),
+            CpuMode::User => self.cpsr, // TODO: What goes here?
             CpuMode::Fiq => self.spsr_fiq,
             CpuMode::Irq => self.spsr_irq,
             CpuMode::Supervisor => self.spsr_svc,
             CpuMode::Abort => self.spsr_abt,
             CpuMode::Undefined => self.spsr_und,
-            CpuMode::System => todo!(),
+            CpuMode::System => self.cpsr, // TODO: Is this right?
         }
     }
 

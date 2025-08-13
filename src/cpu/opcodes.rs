@@ -197,17 +197,14 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
     if (sub_opcode == 0xD || sub_opcode == 0xF) && (opcode & (0b1111 << 16) != 0) {
         return None;
     }
-    let rn = ((opcode & (0b1111 << 16)) >> 16) as usize;
 
-    let mut rd = 0b0000;
+    let rn = (opcode as usize & (0b1111 << 16)) >> 16;
+    let rd = (opcode as usize & (0b1111 << 12)) >> 12;
     if (0x8..=0xA).contains(&sub_opcode) {
-        let dest_reg_mask = 0b1111 << 12;
-        let dest_reg = (opcode & dest_reg_mask) >> 12;
         // Destination register must be *0000* or *1111* for TST/TEQ/CMP/CMN
-        if dest_reg != 0b0000 || dest_reg != 0b1111 {
+        if rd != 0b0000 || rd != 0b1111 {
             return None;
         }
-        rd = dest_reg as usize;
     };
 
     let sub_opcode = unsafe { std::mem::transmute::<u8, DataProcessingOpcode>(sub_opcode) };
