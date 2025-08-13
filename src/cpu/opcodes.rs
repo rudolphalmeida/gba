@@ -43,21 +43,26 @@ pub enum Condition {
 pub fn check_condition(registers: &RegisterFile, opcode: u32) -> bool {
     let condition = unsafe { std::mem::transmute::<u8, Condition>((opcode >> 28) as u8) };
 
+    let zero = registers.zero();
+    let carry = registers.carry();
+    let overflow = registers.overflow();
+    let sign = registers.sign();
+
     match condition {
-        Condition::Equal => registers.zero(),
-        Condition::NotEqual => !registers.zero(),
-        Condition::CarrySet => registers.carry(),
-        Condition::CarryCleared => !registers.carry(),
-        Condition::Minus => registers.sign(),
-        Condition::Positive => !registers.sign(),
-        Condition::Overflow => registers.overflow(),
-        Condition::NoOverflow => !registers.overflow(),
-        Condition::UnsignedHigher => registers.carry() && !registers.zero(),
-        Condition::UnsignedLowerOrSame => !registers.carry() || registers.zero(),
-        Condition::GreaterOrEqual => registers.sign() == registers.overflow(),
-        Condition::LessThan => registers.sign() != registers.overflow(),
-        Condition::GreaterThan => !registers.zero() && (registers.sign() == registers.overflow()),
-        Condition::LessOrEqual => registers.zero() || (registers.sign() != registers.overflow()),
+        Condition::Equal => zero,
+        Condition::NotEqual => !zero,
+        Condition::CarrySet => carry,
+        Condition::CarryCleared => !carry,
+        Condition::Minus => sign,
+        Condition::Positive => !sign,
+        Condition::Overflow => overflow,
+        Condition::NoOverflow => !overflow,
+        Condition::UnsignedHigher => carry && !zero,
+        Condition::UnsignedLowerOrSame => !carry || zero,
+        Condition::GreaterOrEqual => sign == overflow,
+        Condition::LessThan => sign != overflow,
+        Condition::GreaterThan => !zero && (sign == overflow),
+        Condition::LessOrEqual => zero || (sign != overflow),
         Condition::Always => true,
         Condition::Never => false,
     }
@@ -96,8 +101,11 @@ pub enum ArmOpcode {
 
     // Data processing group
     DataProcessing {
+        /// Destination register index. Can be `PC_IDX` in which case the behaviour of the opcode changes
         rd: usize,
+        /// First operand register index
         rn: usize,
+        /// Second operand. Can be register shifted or immediate shifted or immediate
         operand: u32,
         sub_opcode: DataProcessingOpcode,
         set_flags: bool,
@@ -174,7 +182,7 @@ pub fn execute_arm_to_thumb_bx<BusType: SystemBus>(
 
 // Data processing
 fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
-    if opcode & 0xC000000 != 0 {
+    if opcode & 0x0C000000 != 0 {
         return None;
     }
 
@@ -251,6 +259,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
     operand: u32,
     set_flags: bool,
 ) {
+    let operand_1 = cpu.registers[rn]; // rn might be aliased to rd
     let operation = match sub_opcode {
         DataProcessingOpcode::AND => execute_and,
         DataProcessingOpcode::EOR => execute_eor,
@@ -271,6 +280,8 @@ pub fn execute_data_processing<BusType: SystemBus>(
     };
     let (result, carry) = operation(cpu, rd, rn, operand);
 
+    cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
+
     if rd == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
@@ -286,6 +297,10 @@ pub fn execute_data_processing<BusType: SystemBus>(
         return;
     }
 
+    cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
+    cpu.registers
+        .update_flag(CondFlag::Sign, (result as i32) < 0);
+
     match sub_opcode {
         DataProcessingOpcode::AND
         | DataProcessingOpcode::EOR
@@ -295,15 +310,12 @@ pub fn execute_data_processing<BusType: SystemBus>(
         | DataProcessingOpcode::MOV
         | DataProcessingOpcode::BIC
         | DataProcessingOpcode::MVN => {
-            cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
-            cpu.registers
-                .update_flag(CondFlag::Sign, result & (1 << 31) != (1 << 31));
+            // TODO: Carry flag
         }
         _ => {
-            cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
-            cpu.registers
-                .update_flag(CondFlag::Sign, result & (1 << 31) != (1 << 31));
             cpu.registers.update_flag(CondFlag::Carry, carry);
+            let overflow = ((!(operand_1 ^ operand) & (operand ^ result)) >> 31) != 0;
+            cpu.registers.update_flag(CondFlag::Overflow, overflow);
         }
     }
 }
