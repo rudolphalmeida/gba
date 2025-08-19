@@ -69,6 +69,7 @@ pub fn check_condition(registers: &RegisterFile, opcode: u32) -> bool {
 }
 
 #[repr(u8)]
+#[derive(Debug, PartialEq, PartialOrd)]
 pub enum DataProcessingOpcode {
     AND = 0x0,
     EOR = 0x1,
@@ -108,6 +109,8 @@ pub enum ArmOpcode {
         /// Second operand. Can be register shifted or immediate shifted or immediate
         operand: u32,
         sub_opcode: DataProcessingOpcode,
+        /// Last shifted bit if applicable. `None` indicates no shift
+        shifter_carry: Option<bool>,
         set_flags: bool,
     },
 }
@@ -188,7 +191,7 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
 
     let sub_opcode = ((opcode & 0x1E00000) >> 21) as u8;
     // Set condition code flag must be *true* for test and compare opcodes
-    if (0x8..=0xF).contains(&sub_opcode) && (opcode & (1 << 20) != (1 << 20)) {
+    if (0x8..=0xB).contains(&sub_opcode) && (opcode & (1 << 20) != (1 << 20)) {
         return None;
     }
     let set_flags = opcode & (1 << 20) == (1 << 20);
@@ -200,9 +203,9 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
 
     let rn = (opcode as usize & (0b1111 << 16)) >> 16;
     let rd = (opcode as usize & (0b1111 << 12)) >> 12;
-    if (0x8..=0xA).contains(&sub_opcode) {
+    if (0x8..=0xB).contains(&sub_opcode) {
         // Destination register must be *0000* or *1111* for TST/TEQ/CMP/CMN
-        if rd != 0b0000 || rd != 0b1111 {
+        if rd != 0b0000 && rd != 0b1111 {
             return None;
         }
     };
@@ -216,19 +219,23 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
         let shift = (opcode & 0xF00) >> 7;
         let operand = ror(nn, shift);
 
+        let shifter_carry = if shift != 0 {
+            Some((nn >> (shift - 1)) & 1 != 0)
+        } else {
+            None
+        };
         return Some(ArmOpcode::DataProcessing {
             sub_opcode,
             operand,
             rd,
             rn,
+            shifter_carry,
             set_flags,
         });
     } else {
         // Register
         todo!()
     }
-
-    None
 }
 
 fn ror(value: u32, amount: u32) -> u32 {
@@ -254,9 +261,10 @@ pub fn execute_data_processing<BusType: SystemBus>(
     rd: usize,
     rn: usize,
     operand: u32,
+    shifter_carry: Option<bool>,
     set_flags: bool,
 ) {
-    let operand_1 = cpu.registers[rn]; // rn might be aliased to rd
+    let operand_1 = cpu.registers[rn]; // rn might be aliased to rd and we need the initial value
     let operation = match sub_opcode {
         DataProcessingOpcode::AND => execute_and,
         DataProcessingOpcode::EOR => execute_eor,
@@ -277,44 +285,57 @@ pub fn execute_data_processing<BusType: SystemBus>(
     };
     let (result, carry) = operation(cpu, rd, rn, operand);
 
+    if set_flags {
+        cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
+        cpu.registers
+            .update_flag(CondFlag::Sign, (result as i32) < 0);
+
+        match sub_opcode {
+            DataProcessingOpcode::AND
+            | DataProcessingOpcode::EOR
+            | DataProcessingOpcode::TST
+            | DataProcessingOpcode::TEQ
+            | DataProcessingOpcode::ORR
+            | DataProcessingOpcode::MOV
+            | DataProcessingOpcode::BIC
+            | DataProcessingOpcode::MVN => {
+                if let Some(new_carry) = shifter_carry {
+                    cpu.registers.update_flag(CondFlag::Carry, new_carry);
+                }
+            }
+            _ => {
+                cpu.registers.update_flag(CondFlag::Carry, carry);
+                let overflow = ((!(operand_1 ^ operand) & (operand ^ result)) >> 31) != 0;
+                cpu.registers.update_flag(CondFlag::Overflow, overflow);
+            }
+        }
+    }
+
     cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
 
     if rd == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
             cpu.registers.cpsr = cpu.registers.spsr_moded();
-            cpu.switch_cpu_mode(CpuMode::User);
             cpu.registers[PC_IDX] = result;
         }
-        cpu.reload_pipeline(bus);
+        if sub_opcode != DataProcessingOpcode::TST
+            || sub_opcode != DataProcessingOpcode::TEQ
+            || sub_opcode != DataProcessingOpcode::CMP
+            || sub_opcode != DataProcessingOpcode::CMN
+        {
+            cpu.reload_pipeline(bus);
+        } else {
+            cpu.registers.get_and_incr_pc(4);
+        }
         return;
     }
 
-    if !set_flags {
-        return;
-    }
+    cpu.registers.get_and_incr_pc(4);
+}
 
-    cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
-    cpu.registers
-        .update_flag(CondFlag::Sign, (result as i32) < 0);
-
-    match sub_opcode {
-        DataProcessingOpcode::AND
-        | DataProcessingOpcode::EOR
-        | DataProcessingOpcode::TST
-        | DataProcessingOpcode::TEQ
-        | DataProcessingOpcode::ORR
-        | DataProcessingOpcode::MOV
-        | DataProcessingOpcode::BIC
-        | DataProcessingOpcode::MVN => {
-            // TODO: Carry flag
-        }
-        _ => {
-            cpu.registers.update_flag(CondFlag::Carry, carry);
-            let overflow = ((!(operand_1 ^ operand) & (operand ^ result)) >> 31) != 0;
-            cpu.registers.update_flag(CondFlag::Overflow, overflow);
-        }
-    }
+fn do_sub(op_1: u32, op_2: u32) -> (u32, bool) {
+    (op_1.wrapping_sub(op_2), op_1 >= op_2)
 }
 
 fn execute_and(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
@@ -328,13 +349,13 @@ fn execute_eor(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, b
 }
 
 fn execute_sub(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, borrow) = cpu.registers[rn].overflowing_sub(operand);
+    let (result, borrow) = do_sub(cpu.registers[rn], operand);
     cpu.registers[rd] = result;
     (result, borrow)
 }
 
 fn execute_rsb(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, borrow) = operand.overflowing_sub(cpu.registers[rn]);
+    let (result, borrow) = do_sub(operand, cpu.registers[rn]);
     cpu.registers[rd] = result;
     (result, borrow)
 }
@@ -355,15 +376,17 @@ fn execute_adc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, b
 fn execute_sbc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
     let (result, carry1) = cpu.registers[rn].overflowing_sub(operand);
     let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
+    let (result, carry3) = result.overflowing_sub(1);
     cpu.registers[rd] = result;
-    (result, carry1 || carry2)
+    (result, carry1 || carry2 || carry3)
 }
 
 fn execute_rsc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, carry1) = operand.overflowing_add(cpu.registers[rn]);
+    let (result, carry1) = operand.overflowing_sub(cpu.registers[rn]);
     let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
+    let (result, carry3) = result.overflowing_sub(1);
     cpu.registers[rd] = result;
-    (result, carry1 || carry2)
+    (result, carry1 || carry2 || carry3)
 }
 
 fn execute_tst(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
@@ -375,7 +398,7 @@ fn execute_teq(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, b
 }
 
 fn execute_cmp(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    cpu.registers[rn].overflowing_sub(operand)
+    do_sub(cpu.registers[rn], operand)
 }
 
 fn execute_cmn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {

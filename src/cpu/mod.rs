@@ -107,8 +107,18 @@ impl Arm7Cpu {
                 rd,
                 rn,
                 operand,
+                shifter_carry,
                 set_flags,
-            } => execute_data_processing(self, bus, sub_opcode, rd, rn, operand, set_flags),
+            } => execute_data_processing(
+                self,
+                bus,
+                sub_opcode,
+                rd,
+                rn,
+                operand,
+                shifter_carry,
+                set_flags,
+            ),
         }
     }
 }
