@@ -4,6 +4,8 @@
 /*.dll
 **.sav
 
+roms/gba_bios.bin
+
 log.txt
 
 logs
