@@ -112,6 +112,7 @@ impl Arm7Cpu {
                 rn,
                 operand,
                 shifter_carry,
+                shifted_operand,
                 set_flags,
             } => execute_data_processing(
                 self,
@@ -121,6 +122,7 @@ impl Arm7Cpu {
                 rn,
                 operand,
                 shifter_carry,
+                shifted_operand,
                 set_flags,
             ),
         }

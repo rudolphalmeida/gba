@@ -111,6 +111,8 @@ pub enum DecodedArmOpcode {
         sub_opcode: DataProcessingOpcode,
         /// Last shifted bit if applicable. `None` indicates no shift
         shifter_carry: Option<bool>,
+        /// If the operand is an immediate or a register shifted operand
+        shifted_operand: bool,
         set_flags: bool,
     },
 }
@@ -230,6 +232,7 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
             rd,
             rn,
             shifter_carry,
+            shifted_operand: is_immediate, // TODO: Also OR with register shifted
             set_flags,
         });
     } else {
@@ -262,6 +265,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
     rn: usize,
     operand: u32,
     shifter_carry: Option<bool>,
+    shifted_operand: bool,
     set_flags: bool,
 ) {
     let operand_1 = cpu.registers[rn]; // rn might be aliased to rd and we need the initial value
@@ -316,21 +320,19 @@ pub fn execute_data_processing<BusType: SystemBus>(
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
             cpu.registers.cpsr = cpu.registers.spsr_moded();
-            cpu.registers[PC_IDX] = result;
         }
         if sub_opcode != DataProcessingOpcode::TST
-            || sub_opcode != DataProcessingOpcode::TEQ
-            || sub_opcode != DataProcessingOpcode::CMP
-            || sub_opcode != DataProcessingOpcode::CMN
+            && sub_opcode != DataProcessingOpcode::TEQ
+            && sub_opcode != DataProcessingOpcode::CMP
+            && sub_opcode != DataProcessingOpcode::CMN
         {
             cpu.reload_pipeline(bus);
-        } else {
+        } else if shifted_operand {
             cpu.registers.get_and_incr_pc(4);
         }
-        return;
+    } else if shifted_operand {
+        cpu.registers.get_and_incr_pc(4);
     }
-
-    cpu.registers.get_and_incr_pc(4);
 }
 
 fn do_sub(operand_a: u32, operand_b: u32) -> (u32, bool, bool) {
