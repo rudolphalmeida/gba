@@ -1,6 +1,6 @@
 use crate::cpu::opcodes::{
     check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_data_processing, ArmOpcode, Opcode,
+    execute_data_processing, DecodedArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
@@ -95,14 +95,18 @@ impl Arm7Cpu {
         }
     }
 
-    fn execute_arm_opcode<BusType: SystemBus>(&mut self, opcode: ArmOpcode, bus: &mut BusType) {
+    fn execute_arm_opcode<BusType: SystemBus>(
+        &mut self,
+        opcode: DecodedArmOpcode,
+        bus: &mut BusType,
+    ) {
         match opcode {
-            ArmOpcode::B { offset } => execute_b(self, bus, offset),
-            ArmOpcode::BL { offset } => execute_bl(self, bus, offset),
-            ArmOpcode::BX { register_idx } => {
+            DecodedArmOpcode::B { offset } => execute_b(self, bus, offset),
+            DecodedArmOpcode::BL { offset } => execute_bl(self, bus, offset),
+            DecodedArmOpcode::BX { register_idx } => {
                 execute_arm_to_thumb_bx(self, bus, register_idx as usize)
             }
-            ArmOpcode::DataProcessing {
+            DecodedArmOpcode::DataProcessing {
                 sub_opcode,
                 rd,
                 rn,

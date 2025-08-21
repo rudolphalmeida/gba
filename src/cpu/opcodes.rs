@@ -2,7 +2,7 @@ use crate::cpu::registers::{CpuState, RegisterFile, PC_IDX};
 use crate::cpu::Arm7Cpu;
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 
-use super::registers::{CondFlag, CpuMode};
+use super::registers::CondFlag;
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     if let Some(decoded_opcode) = try_decode_b_bl(opcode) {
@@ -89,7 +89,7 @@ pub enum DataProcessingOpcode {
     MVN = 0xF,
 }
 
-pub enum ArmOpcode {
+pub enum DecodedArmOpcode {
     B {
         offset: u32,
     }, // Offset is a signed 24-bit quantity
@@ -116,21 +116,21 @@ pub enum ArmOpcode {
 }
 
 pub enum Opcode {
-    Arm(ArmOpcode),
+    Arm(DecodedArmOpcode),
     Thumb,
 }
 
-fn try_decode_b_bl(opcode: u32) -> Option<ArmOpcode> {
+fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
     if opcode & 0xE000000 != 0xA000000 {
         return None;
     }
 
     let mask = 1 << 24;
     match opcode & mask {
-        0 => Some(ArmOpcode::B {
+        0 => Some(DecodedArmOpcode::B {
             offset: opcode & 0xFFFFFF,
         }),
-        mask => Some(ArmOpcode::BL {
+        mask => Some(DecodedArmOpcode::BL {
             offset: opcode & 0xFFFFFF,
         }),
     }
@@ -155,13 +155,13 @@ pub fn execute_bl<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType, offs
 }
 
 // BX
-fn try_decode_bx(opcode: u32) -> Option<ArmOpcode> {
+fn try_decode_bx(opcode: u32) -> Option<DecodedArmOpcode> {
     if opcode & 0x0FFFFF10 != 0x012FFF10 {
         // Ignoring BLX
         return None;
     }
 
-    Some(ArmOpcode::BX {
+    Some(DecodedArmOpcode::BX {
         register_idx: opcode as u8 & 0xF,
     })
 }
@@ -184,7 +184,7 @@ pub fn execute_arm_to_thumb_bx<BusType: SystemBus>(
 }
 
 // Data processing
-fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
+fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
     if opcode & 0x0C000000 != 0 {
         return None;
     }
@@ -224,7 +224,7 @@ fn try_decode_data_processing(opcode: u32) -> Option<ArmOpcode> {
         } else {
             None
         };
-        return Some(ArmOpcode::DataProcessing {
+        return Some(DecodedArmOpcode::DataProcessing {
             sub_opcode,
             operand,
             rd,
