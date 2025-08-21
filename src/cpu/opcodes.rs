@@ -394,7 +394,7 @@ fn execute_adc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, b
 
     let carry = result & (1 << 32) != 0;
     let overflow =
-        (!(cpu.registers[rn] ^ operand) & (cpu.registers[rn] ^ (result as u32)) >> 31) != 0;
+        (!(cpu.registers[rn] ^ operand) & (cpu.registers[rn] ^ (result as u32))) >> 31 != 0;
     cpu.registers[rd] = result as u32;
 
     (cpu.registers[rd], carry, overflow)
