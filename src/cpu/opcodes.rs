@@ -283,7 +283,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
         DataProcessingOpcode::BIC => execute_bic,
         DataProcessingOpcode::MVN => execute_mvn,
     };
-    let (result, carry) = operation(cpu, rd, rn, operand);
+    let (result, carry, overflow) = operation(cpu, rd, rn, operand);
 
     if set_flags {
         cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
@@ -299,13 +299,12 @@ pub fn execute_data_processing<BusType: SystemBus>(
             | DataProcessingOpcode::MOV
             | DataProcessingOpcode::BIC
             | DataProcessingOpcode::MVN => {
-                if let Some(new_carry) = shifter_carry {
-                    cpu.registers.update_flag(CondFlag::Carry, new_carry);
+                if let Some(carry) = shifter_carry {
+                    cpu.registers.update_flag(CondFlag::Carry, carry);
                 }
             }
             _ => {
                 cpu.registers.update_flag(CondFlag::Carry, carry);
-                let overflow = ((!(operand_1 ^ operand) & (operand ^ result)) >> 31) != 0;
                 cpu.registers.update_flag(CondFlag::Overflow, overflow);
             }
         }
@@ -334,93 +333,115 @@ pub fn execute_data_processing<BusType: SystemBus>(
     cpu.registers.get_and_incr_pc(4);
 }
 
-fn do_sub(op_1: u32, op_2: u32) -> (u32, bool) {
-    (op_1.wrapping_sub(op_2), op_1 >= op_2)
+fn do_sub(operand_a: u32, operand_b: u32) -> (u32, bool, bool) {
+    let result = operand_a.wrapping_sub(operand_b);
+    let overflow = (((operand_a ^ operand_b) & (operand_a ^ result)) >> 31) != 0;
+    (result, operand_a >= operand_b, overflow)
 }
 
-fn execute_and(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn do_add(operand_a: u32, operand_b: u32) -> (u32, bool, bool) {
+    let (result, carry) = operand_a.overflowing_add(operand_b);
+    let overflow = ((!(operand_a ^ operand_b) & (operand_a ^ result)) >> 31) != 0;
+    (result, carry, overflow)
+}
+
+fn do_sbc(operand_a: u32, operand_b: u32, carry: bool) -> (u32, bool, bool) {
+    let operand_c = (if carry { 1 } else { 0 }) ^ 1;
+    let result = operand_a.wrapping_sub(operand_b).wrapping_sub(operand_c);
+
+    let carry = (operand_a as u64) >= ((operand_b as u64) + (operand_c as u64));
+    let overflow = (((operand_a ^ operand_b) & (operand_a ^ result)) >> 31) != 0;
+
+    (result, carry, overflow)
+}
+
+fn execute_and(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = cpu.registers[rn] & operand;
-    (cpu.registers[rd], false)
+    (cpu.registers[rd], false, false)
 }
 
-fn execute_eor(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn execute_eor(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = cpu.registers[rn] ^ operand;
-    (cpu.registers[rd], false)
+    (cpu.registers[rd], false, false)
 }
 
-fn execute_sub(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, borrow) = do_sub(cpu.registers[rn], operand);
-    cpu.registers[rd] = result;
-    (result, borrow)
+fn execute_sub(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    let result = do_sub(cpu.registers[rn], operand);
+    cpu.registers[rd] = result.0;
+    result
 }
 
-fn execute_rsb(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, borrow) = do_sub(operand, cpu.registers[rn]);
-    cpu.registers[rd] = result;
-    (result, borrow)
+fn execute_rsb(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    let result = do_sub(operand, cpu.registers[rn]);
+    cpu.registers[rd] = result.0;
+    result
 }
 
-fn execute_add(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, carry) = cpu.registers[rn].overflowing_add(operand);
-    cpu.registers[rd] = result;
-    (result, carry)
+fn execute_add(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    let result = do_add(cpu.registers[rn], operand);
+    cpu.registers[rd] = result.0;
+    result
 }
 
-fn execute_adc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, carry1) = cpu.registers[rn].overflowing_add(operand);
-    let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
-    cpu.registers[rd] = result;
-    (result, carry1 || carry2)
+fn execute_adc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    let operand_a = cpu.registers[rn] as u64;
+    let operand_b = operand as u64;
+    let carry = if cpu.registers.carry() { 1 } else { 0 };
+
+    let result = operand_a.wrapping_add(operand_b).wrapping_add(carry);
+
+    let carry = result & (1 << 32) != 0;
+    let overflow =
+        (!(cpu.registers[rn] ^ operand) & (cpu.registers[rn] ^ (result as u32)) >> 31) != 0;
+    cpu.registers[rd] = result as u32;
+
+    (cpu.registers[rd], carry, overflow)
 }
 
-fn execute_sbc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, carry1) = cpu.registers[rn].overflowing_sub(operand);
-    let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
-    let (result, carry3) = result.overflowing_sub(1);
-    cpu.registers[rd] = result;
-    (result, carry1 || carry2 || carry3)
+fn execute_sbc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    let result = do_sbc(cpu.registers[rn], operand, cpu.registers.carry());
+    cpu.registers[rd] = result.0;
+    result
 }
 
-fn execute_rsc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    let (result, carry1) = operand.overflowing_sub(cpu.registers[rn]);
-    let (result, carry2) = result.overflowing_add(if cpu.registers.carry() { 1 } else { 0 });
-    let (result, carry3) = result.overflowing_sub(1);
-    cpu.registers[rd] = result;
-    (result, carry1 || carry2 || carry3)
+fn execute_rsc(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    let result = do_sbc(operand, cpu.registers[rn], cpu.registers.carry());
+    cpu.registers[rd] = result.0;
+    result
 }
 
-fn execute_tst(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    (cpu.registers[rn] & operand, false)
+fn execute_tst(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    (cpu.registers[rn] & operand, false, false)
 }
 
-fn execute_teq(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    (cpu.registers[rn] ^ operand, false)
+fn execute_teq(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    (cpu.registers[rn] ^ operand, false, false)
 }
 
-fn execute_cmp(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn execute_cmp(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     do_sub(cpu.registers[rn], operand)
 }
 
-fn execute_cmn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
-    cpu.registers[rn].overflowing_add(operand)
+fn execute_cmn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
+    do_add(cpu.registers[rn], operand)
 }
 
-fn execute_orr(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn execute_orr(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = cpu.registers[rn] | operand;
-    (cpu.registers[rd], false)
+    (cpu.registers[rd], false, false)
 }
 
-fn execute_mov(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn execute_mov(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = operand;
-    (cpu.registers[rd], false)
+    (cpu.registers[rd], false, false)
 }
 
-fn execute_bic(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn execute_bic(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = cpu.registers[rn] & !operand;
-    (cpu.registers[rd], false)
+    (cpu.registers[rd], false, false)
 }
 
-fn execute_mvn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool) {
+fn execute_mvn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = !operand;
-    (cpu.registers[rd], false)
+    (cpu.registers[rd], false, false)
 }
