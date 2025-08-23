@@ -5,16 +5,14 @@ use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 use super::registers::CondFlag;
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
-    if let Some(decoded_opcode) = try_decode_b_bl(opcode) {
-        return Some(Opcode::Arm(decoded_opcode));
-    }
+    // TODO: This is possibly a slow decoding scheme. Try a LUT?
 
-    if let Some(decoded_opcode) = try_decode_bx(opcode) {
-        return Some(Opcode::Arm(decoded_opcode));
-    }
+    let decoders = [try_decode_b_bl, try_decode_bx, try_decode_data_processing];
 
-    if let Some(decoded_opcode) = try_decode_data_processing(opcode) {
-        return Some(Opcode::Arm(decoded_opcode));
+    for decoder in decoders {
+        if let Some(decoded_opcode) = decoder(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
     }
 
     None
@@ -89,6 +87,33 @@ pub enum DataProcessingOpcode {
     MVN = 0xF,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShiftType {
+    Lsl,
+    Lsr,
+    Asr,
+    Ror,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DataProcessingOperand {
+    Immediate(u32),
+    ShiftedImmediate {
+        operand: u32,
+        shift: u32, // Always ROR
+    },
+    RegisterShiftedRegister {
+        operand_register: usize,
+        shift_register: usize,
+        shift_type: ShiftType,
+    },
+    ImmediateShiftedRegister {
+        operand_register: usize,
+        shift: u32,
+        shift_type: ShiftType,
+    },
+}
+
 pub enum DecodedArmOpcode {
     B {
         offset: u32,
@@ -102,17 +127,12 @@ pub enum DecodedArmOpcode {
 
     // Data processing group
     DataProcessing {
+        operand: DataProcessingOperand,
         /// Destination register index. Can be `PC_IDX` in which case the behaviour of the opcode changes
         rd: usize,
         /// First operand register index
         rn: usize,
-        /// Second operand. Can be register shifted or immediate shifted or immediate
-        operand: u32,
         sub_opcode: DataProcessingOpcode,
-        /// Last shifted bit if applicable. `None` indicates no shift
-        shifter_carry: Option<bool>,
-        /// If the operand is an immediate or a register shifted operand
-        shifted_operand: bool,
         set_flags: bool,
     },
 }
@@ -215,36 +235,35 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
     let sub_opcode = unsafe { std::mem::transmute::<u8, DataProcessingOpcode>(sub_opcode) };
 
     let is_immediate = opcode & (1 << 25) != 0;
-    if is_immediate {
+    let operand = if is_immediate {
         let nn = opcode & 0xFF;
         // Shifted in jumps of 2 so 7 instead of 8 to keep LSB 0
         let shift = (opcode & 0xF00) >> 7;
-        let operand = ror(nn, shift);
 
-        let shifter_carry = if shift != 0 {
-            Some((nn >> (shift - 1)) & 1 != 0)
+        if shift != 0 {
+            DataProcessingOperand::ShiftedImmediate {
+                operand: nn,
+                shift: shift,
+            }
         } else {
-            None
-        };
-        return Some(DecodedArmOpcode::DataProcessing {
-            sub_opcode,
-            operand,
-            rd,
-            rn,
-            shifter_carry,
-            shifted_operand: is_immediate, // TODO: Also OR with register shifted
-            set_flags,
-        });
+            DataProcessingOperand::Immediate(nn)
+        }
     } else {
         // Register
-        todo!()
-    }
+        DataProcessingOperand::Immediate(0x00)
+    };
+
+    Some(DecodedArmOpcode::DataProcessing {
+        operand,
+        rd,
+        rn,
+        sub_opcode,
+        set_flags,
+    })
 }
 
 fn ror(value: u32, amount: u32) -> u32 {
     //! Rotate Right
-
-    // FIXME
     value.rotate_right(amount)
 }
 
@@ -263,12 +282,29 @@ pub fn execute_data_processing<BusType: SystemBus>(
     sub_opcode: DataProcessingOpcode,
     rd: usize,
     rn: usize,
-    operand: u32,
-    shifter_carry: Option<bool>,
-    shifted_operand: bool,
+    operand: DataProcessingOperand,
     set_flags: bool,
 ) {
-    let operand_1 = cpu.registers[rn]; // rn might be aliased to rd and we need the initial value
+    let operand_a = cpu.registers[rn]; // rn might be aliased to rd and we need the initial value
+    let (operand_b, shifted_carry) = match operand {
+        DataProcessingOperand::Immediate(value) => (value, None),
+        DataProcessingOperand::ShiftedImmediate { operand, shift } => {
+            let shifted_operand = ror(operand, shift);
+            let shifted_carry = (operand >> (shift - 1)) & 1 != 0;
+            (shifted_operand, Some(shifted_carry))
+        }
+        DataProcessingOperand::RegisterShiftedRegister {
+            operand_register,
+            shift_register,
+            shift_type,
+        } => (0x00, None), // TODO
+        DataProcessingOperand::ImmediateShiftedRegister {
+            operand_register,
+            shift,
+            shift_type,
+        } => (0x00, None), // TODO
+    };
+
     let operation = match sub_opcode {
         DataProcessingOpcode::AND => execute_and,
         DataProcessingOpcode::EOR => execute_eor,
@@ -287,7 +323,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
         DataProcessingOpcode::BIC => execute_bic,
         DataProcessingOpcode::MVN => execute_mvn,
     };
-    let (result, carry, overflow) = operation(cpu, rd, rn, operand);
+    let (result, carry, overflow) = operation(cpu, rd, rn, operand_b);
 
     if set_flags {
         cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
@@ -303,7 +339,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             | DataProcessingOpcode::MOV
             | DataProcessingOpcode::BIC
             | DataProcessingOpcode::MVN => {
-                if let Some(carry) = shifter_carry {
+                if let Some(carry) = shifted_carry {
                     cpu.registers.update_flag(CondFlag::Carry, carry);
                 }
             }
@@ -316,6 +352,16 @@ pub fn execute_data_processing<BusType: SystemBus>(
 
     cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
 
+    let shifted_operand = matches!(operand, DataProcessingOperand::ShiftedImmediate { .. })
+        || matches!(
+            operand,
+            DataProcessingOperand::ImmediateShiftedRegister { .. }
+        )
+        || matches!(
+            operand,
+            DataProcessingOperand::RegisterShiftedRegister { .. }
+        );
+
     if rd == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
@@ -327,10 +373,10 @@ pub fn execute_data_processing<BusType: SystemBus>(
             && sub_opcode != DataProcessingOpcode::CMN
         {
             cpu.reload_pipeline(bus);
-        } else if shifted_operand {
+        } else {
             cpu.registers.get_and_incr_pc(4);
         }
-    } else if shifted_operand {
+    } else {
         cpu.registers.get_and_incr_pc(4);
     }
 }

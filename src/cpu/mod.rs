@@ -111,20 +111,8 @@ impl Arm7Cpu {
                 rd,
                 rn,
                 operand,
-                shifter_carry,
-                shifted_operand,
                 set_flags,
-            } => execute_data_processing(
-                self,
-                bus,
-                sub_opcode,
-                rd,
-                rn,
-                operand,
-                shifter_carry,
-                shifted_operand,
-                set_flags,
-            ),
+            } => execute_data_processing(self, bus, sub_opcode, rd, rn, operand, set_flags),
         }
     }
 }
@@ -582,6 +570,7 @@ mod tests {
     #[test_case("arm_b_bl")]
     #[test_case("arm_bx")]
     #[test_case("arm_data_proc_immediate")]
+    #[test_case("arm_data_proc_immediate_shift")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
