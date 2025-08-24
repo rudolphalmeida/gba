@@ -260,7 +260,6 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
         let operand_register = opcode as usize & 0xF;
         let shift_type = unsafe { std::mem::transmute(((opcode & 0x60) >> 5) as u8) };
 
-        // TODO: Convert between shift types for special values
         if shift_by_register {
             let shift_register = ((opcode & 0xF00) >> 8) as usize;
             DataProcessingOperand::RegisterShiftedRegister {
@@ -287,15 +286,15 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
 }
 
 fn lsl(value: u32, amount: u32) -> u32 {
-    value
+    value.wrapping_shl(amount)
 }
 
 fn lsr(value: u32, amount: u32) -> u32 {
-    value
+    value.wrapping_shr(amount)
 }
 
 fn asr(value: u32, amount: u32) -> u32 {
-    value
+    (value as i32).wrapping_shr(amount) as u32
 }
 
 fn ror(value: u32, amount: u32) -> u32 {
@@ -305,9 +304,9 @@ fn ror(value: u32, amount: u32) -> u32 {
 /// Calls the proper shift function and returns the shifted (rotated) value and shifted out carry
 fn shift(shift_type: ShiftType, value: u32, amount: u32, carry: bool) -> (u32, bool) {
     match shift_type {
-        ShiftType::Lsl => (lsl(value, amount), false),
-        ShiftType::Lsr => (lsr(value, amount), false),
-        ShiftType::Asr => (asr(value, amount), false),
+        ShiftType::Lsl => (lsl(value, amount), (value << (amount - 1)) & (1 << 31) != 0),
+        ShiftType::Lsr => (lsr(value, amount), (value >> (amount - 1)) & 1 != 0),
+        ShiftType::Asr => (asr(value, amount), (value as i32 >> (amount - 1)) & 1 != 0),
         ShiftType::Ror => (ror(value, amount), (value >> (amount - 1)) & 1 != 0),
     }
 }
