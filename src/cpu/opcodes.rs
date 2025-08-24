@@ -88,11 +88,12 @@ pub enum DataProcessingOpcode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum ShiftType {
-    Lsl,
-    Lsr,
-    Asr,
-    Ror,
+    Lsl = 0b00,
+    Lsr = 0b01,
+    Asr = 0b10,
+    Ror = 0b11,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -250,7 +251,30 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
         }
     } else {
         // Register
-        DataProcessingOperand::Immediate(0x00)
+        let shift_by_register = (opcode & 0x10) != 0;
+        if shift_by_register && (opcode & 0x80 != 0) {
+            // Bit 7 must be 0 when shifting by register
+            return None;
+        }
+
+        let operand_register = opcode as usize & 0xF;
+        let shift_type = unsafe { std::mem::transmute(((opcode & 0x60) >> 5) as u8) };
+
+        // TODO: Convert between shift types for special values
+        if shift_by_register {
+            let shift_register = ((opcode & 0xF00) >> 8) as usize;
+            DataProcessingOperand::RegisterShiftedRegister {
+                operand_register,
+                shift_register,
+                shift_type,
+            }
+        } else {
+            DataProcessingOperand::ImmediateShiftedRegister {
+                operand_register,
+                shift: (opcode & 0xF80) >> 7,
+                shift_type,
+            }
+        }
     };
 
     Some(DecodedArmOpcode::DataProcessing {
@@ -262,18 +286,30 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
     })
 }
 
+fn lsl(value: u32, amount: u32) -> u32 {
+    value
+}
+
+fn lsr(value: u32, amount: u32) -> u32 {
+    value
+}
+
+fn asr(value: u32, amount: u32) -> u32 {
+    value
+}
+
 fn ror(value: u32, amount: u32) -> u32 {
-    //! Rotate Right
     value.rotate_right(amount)
 }
 
-fn rrx(value: u32, amount: u32, extension: bool) -> u32 {
-    //! Rotate right extended. The extension is used as the 33rd bit when shifting
-    //! in from the right. Some of the possible values for `extension` are:
-    //! - `RegisterFile::carry()`
-
-    // FIXME
-    value
+/// Calls the proper shift function and returns the shifted (rotated) value and shifted out carry
+fn shift(shift_type: ShiftType, value: u32, amount: u32, carry: bool) -> (u32, bool) {
+    match shift_type {
+        ShiftType::Lsl => (lsl(value, amount), false),
+        ShiftType::Lsr => (lsr(value, amount), false),
+        ShiftType::Asr => (asr(value, amount), false),
+        ShiftType::Ror => (ror(value, amount), (value >> (amount - 1)) & 1 != 0),
+    }
 }
 
 pub fn execute_data_processing<BusType: SystemBus>(
@@ -297,12 +333,45 @@ pub fn execute_data_processing<BusType: SystemBus>(
             operand_register,
             shift_register,
             shift_type,
-        } => (0x00, None), // TODO
+        } => {
+            // Only lower 8 bits of shift amount are used
+            let shift_amount = cpu.registers[shift_register] & 0xFF;
+            let value = cpu.registers[operand_register];
+            let (value, carry) = shift(shift_type, value, shift_amount, cpu.registers.carry());
+
+            // TODO: Additional CPU cycle goes here
+
+            (value, Some(carry))
+        }
         DataProcessingOperand::ImmediateShiftedRegister {
             operand_register,
-            shift,
+            shift: shift_amount,
             shift_type,
-        } => (0x00, None), // TODO
+        } if shift_amount == 0 => {
+            let value = cpu.registers[operand_register];
+            match shift_type {
+                ShiftType::Lsl => (value, None), // No shift, C flag not affected
+                ShiftType::Lsr => (0, Some(value & (1 << 31) != 0)), // operand is 0, C flag is bit 31 of register
+                ShiftType::Asr => (((value as i32) >> 31) as u32, Some(value & (1 << 31) != 0)), // all operand bit and C are copies of bit 31 of register value
+                ShiftType::Ror => {
+                    // Same as ror(value, 1) but bit 31 set to current C
+                    let carry = cpu.registers.carry();
+                    let result = ror(value, 1);
+                    let mask = 1 << 31;
+                    let result = if carry { result | mask } else { result & !mask };
+                    (result, Some(value & 1 != 0))
+                }
+            }
+        }
+        DataProcessingOperand::ImmediateShiftedRegister {
+            operand_register,
+            shift: shift_amount,
+            shift_type,
+        } => {
+            let value = cpu.registers[operand_register];
+            let (value, carry) = shift(shift_type, value, shift_amount, cpu.registers.carry());
+            (value, Some(carry))
+        }
     };
 
     let operation = match sub_opcode {
