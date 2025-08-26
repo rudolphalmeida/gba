@@ -571,6 +571,7 @@ mod tests {
     #[test_case("arm_bx")]
     #[test_case("arm_data_proc_immediate")]
     #[test_case("arm_data_proc_immediate_shift")]
+    #[test_case("arm_data_proc_register_shift")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 

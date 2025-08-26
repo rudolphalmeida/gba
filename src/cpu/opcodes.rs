@@ -302,12 +302,28 @@ fn ror(value: u32, amount: u32) -> u32 {
 }
 
 /// Calls the proper shift function and returns the shifted (rotated) value and shifted out carry
-fn shift(shift_type: ShiftType, value: u32, amount: u32, carry: bool) -> (u32, bool) {
+fn shift(shift_type: ShiftType, value: u32, amount: u32) -> (u32, bool) {
+    if amount == 0 {
+        return (value, false);
+    }
+
     match shift_type {
-        ShiftType::Lsl => (lsl(value, amount), (value << (amount - 1)) & (1 << 31) != 0),
-        ShiftType::Lsr => (lsr(value, amount), (value >> (amount - 1)) & 1 != 0),
-        ShiftType::Asr => (asr(value, amount), (value as i32 >> (amount - 1)) & 1 != 0),
-        ShiftType::Ror => (ror(value, amount), (value >> (amount - 1)) & 1 != 0),
+        ShiftType::Lsl => (
+            lsl(value, amount),
+            (value.wrapping_shl(amount - 1)) & (1 << 31) != 0,
+        ),
+        ShiftType::Lsr => (
+            lsr(value, amount),
+            (value.wrapping_shr(amount - 1)) & 1 != 0,
+        ),
+        ShiftType::Asr => (
+            asr(value, amount),
+            ((value as i32).wrapping_shr(amount - 1)) & 1 != 0,
+        ),
+        ShiftType::Ror => (
+            ror(value, amount),
+            (value.wrapping_shr(amount - 1)) & 1 != 0,
+        ),
     }
 }
 
@@ -336,7 +352,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             // Only lower 8 bits of shift amount are used
             let shift_amount = cpu.registers[shift_register] & 0xFF;
             let value = cpu.registers[operand_register];
-            let (value, carry) = shift(shift_type, value, shift_amount, cpu.registers.carry());
+            let (value, carry) = shift(shift_type, value, shift_amount);
 
             // TODO: Additional CPU cycle goes here
 
@@ -368,7 +384,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             shift_type,
         } => {
             let value = cpu.registers[operand_register];
-            let (value, carry) = shift(shift_type, value, shift_amount, cpu.registers.carry());
+            let (value, carry) = shift(shift_type, value, shift_amount);
             (value, Some(carry))
         }
     };
