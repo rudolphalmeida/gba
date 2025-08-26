@@ -116,7 +116,7 @@ pub enum GamePakError {
 
 #[cfg(test)]
 mod tests {
-    use crate::gamepak::{Gamepak, GamePakError, GamePakHeader};
+    use crate::gamepak::{GamePakError, GamePakHeader, Gamepak};
 
     fn gen_header() -> Vec<u8> {
         let mut header_bytes = vec![0x00; 0xC0];

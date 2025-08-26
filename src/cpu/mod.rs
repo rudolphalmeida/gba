@@ -88,6 +88,7 @@ impl Arm7Cpu {
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
             if check_condition(&self.registers, execute_opcode) {
+                println!("{:?}", opcode);
                 self.execute_arm_opcode(opcode, bus);
             } else {
                 bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE);

@@ -67,7 +67,7 @@ pub fn check_condition(registers: &RegisterFile, opcode: u32) -> bool {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum DataProcessingOpcode {
     AND = 0x0,
     EOR = 0x1,
@@ -119,6 +119,7 @@ pub enum DataProcessingOperand {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
 #[derive(Debug, Clone, Copy)]
 pub enum DecodedArmOpcode {
     B {
