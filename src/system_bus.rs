@@ -8,6 +8,8 @@ pub const ACCESS_DMA: u8 = 4;
 pub const ACCESS_LOCK: u8 = 8;
 
 pub trait SystemBus {
+    fn idle(&mut self);
+
     fn read_word(&mut self, address: u32, access: u8) -> u32;
     fn write_word(&mut self, address: u32, data: u32, access: u8);
 
@@ -41,6 +43,8 @@ impl Bus {
 }
 
 impl SystemBus for Bus {
+    fn idle(&mut self) {}
+
     fn read_word(&mut self, mut address: u32, _access: u8) -> u32 {
         address &= !3;
         match address {

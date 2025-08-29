@@ -90,9 +90,13 @@ pub enum DataProcessingOpcode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ShiftType {
+    /// Logical Shift Left
     Lsl = 0b00,
+    /// Logical Shift Right
     Lsr = 0b01,
+    /// Arithmetic Shift Right
     Asr = 0b10,
+    /// Rotate Right
     Ror = 0b11,
 }
 
@@ -355,6 +359,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             let (value, carry) = shift(shift_type, value, shift_amount);
 
             // TODO: Additional CPU cycle goes here
+            bus.idle();
 
             (value, Some(carry))
         }
@@ -389,25 +394,24 @@ pub fn execute_data_processing<BusType: SystemBus>(
         }
     };
 
-    let operation = match sub_opcode {
-        DataProcessingOpcode::AND => execute_and,
-        DataProcessingOpcode::EOR => execute_eor,
-        DataProcessingOpcode::SUB => execute_sub,
-        DataProcessingOpcode::RSB => execute_rsb,
-        DataProcessingOpcode::ADD => execute_add,
-        DataProcessingOpcode::ADC => execute_adc,
-        DataProcessingOpcode::SBC => execute_sbc,
-        DataProcessingOpcode::RSC => execute_rsc,
-        DataProcessingOpcode::TST => execute_tst,
-        DataProcessingOpcode::TEQ => execute_teq,
-        DataProcessingOpcode::CMP => execute_cmp,
-        DataProcessingOpcode::CMN => execute_cmn,
-        DataProcessingOpcode::ORR => execute_orr,
-        DataProcessingOpcode::MOV => execute_mov,
-        DataProcessingOpcode::BIC => execute_bic,
-        DataProcessingOpcode::MVN => execute_mvn,
+    let (result, carry, overflow) = match sub_opcode {
+        DataProcessingOpcode::AND => execute_and(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::EOR => execute_eor(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::SUB => execute_sub(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::RSB => execute_rsb(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::ADD => execute_add(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::ADC => execute_adc(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::SBC => execute_sbc(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::RSC => execute_rsc(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::TST => execute_tst(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::TEQ => execute_teq(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::CMP => execute_cmp(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::CMN => execute_cmn(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::ORR => execute_orr(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::MOV => execute_mov(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::BIC => execute_bic(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::MVN => execute_mvn(cpu, rd, rn, operand_b),
     };
-    let (result, carry, overflow) = operation(cpu, rd, rn, operand_b);
 
     if set_flags {
         cpu.registers.update_flag(CondFlag::Zero, result == 0x00);
@@ -435,16 +439,6 @@ pub fn execute_data_processing<BusType: SystemBus>(
     }
 
     cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
-
-    let shifted_operand = matches!(operand, DataProcessingOperand::ShiftedImmediate { .. })
-        || matches!(
-            operand,
-            DataProcessingOperand::ImmediateShiftedRegister { .. }
-        )
-        || matches!(
-            operand,
-            DataProcessingOperand::RegisterShiftedRegister { .. }
-        );
 
     if rd == PC_IDX {
         if set_flags {

@@ -256,6 +256,8 @@ mod tests {
         fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
             todo!()
         }
+
+        fn idle(&mut self) {}
     }
 
     #[derive(Serialize, Deserialize)]
