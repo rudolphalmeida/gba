@@ -2,9 +2,10 @@
 #![allow(unused_variables)]
 
 pub mod cpu;
+pub mod events;
 pub mod gamepak;
-pub mod system_bus;
 pub mod gba;
+pub mod system_bus;
 
 #[cfg(test)]
 mod tests {}
