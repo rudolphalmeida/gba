@@ -67,7 +67,7 @@ pub fn check_condition(registers: &RegisterFile, opcode: u32) -> bool {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub enum DataProcessingOpcode {
     AND = 0x0,
     EOR = 0x1,
@@ -119,6 +119,7 @@ pub enum DataProcessingOperand {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum DecodedArmOpcode {
     B {
         offset: u32,
@@ -142,6 +143,7 @@ pub enum DecodedArmOpcode {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Opcode {
     Arm(DecodedArmOpcode),
     Thumb,
@@ -290,15 +292,15 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
 }
 
 fn lsl(value: u32, amount: u32) -> u32 {
-    value.wrapping_shl(amount)
+    value.unbounded_shl(amount)
 }
 
 fn lsr(value: u32, amount: u32) -> u32 {
-    value.wrapping_shr(amount)
+    value.unbounded_shr(amount)
 }
 
 fn asr(value: u32, amount: u32) -> u32 {
-    (value as i32).wrapping_shr(amount) as u32
+    (value as i32).unbounded_shr(amount) as u32
 }
 
 fn ror(value: u32, amount: u32) -> u32 {
@@ -311,23 +313,27 @@ fn shift(shift_type: ShiftType, value: u32, amount: u32) -> (u32, bool) {
         return (value, false);
     }
 
+    let expanded_value = value as u64;
+    let expanded_amount = 33.min(amount);
+
     match shift_type {
         ShiftType::Lsl => (
             lsl(value, amount),
-            (value.wrapping_shl(amount - 1)) & (1 << 31) != 0,
+            ((expanded_value.unbounded_shl(expanded_amount - 1)) >> 31 & 0b1) != 0,
         ),
         ShiftType::Lsr => (
             lsr(value, amount),
-            (value.wrapping_shr(amount - 1)) & 1 != 0,
+            (expanded_value.unbounded_shr(expanded_amount - 1)) & 0b1 != 0,
         ),
         ShiftType::Asr => (
             asr(value, amount),
-            ((value as i32).wrapping_shr(amount - 1)) & 1 != 0,
+            ((expanded_value as i32 as i64).unbounded_shr(expanded_amount - 1)) & 0b1 != 0,
         ),
-        ShiftType::Ror => (
-            ror(value, amount),
-            (value.wrapping_shr(amount - 1)) & 1 != 0,
-        ),
+        ShiftType::Ror => {
+            let res = ror(value, amount);
+            let carry = (res >> 31) & 0b1 != 0;
+            (res, carry)
+        }
     }
 }
 
@@ -340,6 +346,8 @@ pub fn execute_data_processing<BusType: SystemBus>(
     operand: DataProcessingOperand,
     set_flags: bool,
 ) {
+    cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
+
     let operand_a = cpu.registers[rn]; // rn might be aliased to rd and we need the initial value
     let (operand_b, shifted_carry) = match operand {
         DataProcessingOperand::Immediate(value) => (value, None),
@@ -355,13 +363,16 @@ pub fn execute_data_processing<BusType: SystemBus>(
         } => {
             // Only lower 8 bits of shift amount are used
             let shift_amount = cpu.registers[shift_register] & 0xFF;
+
+            bus.idle();
+            cpu.registers[PC_IDX] += 4;
+            cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ; // nOPC is 1 when shift(Rs)
+
             let value = cpu.registers[operand_register];
+
             let (value, carry) = shift(shift_type, value, shift_amount);
 
-            // TODO: Additional CPU cycle goes here
-            bus.idle();
-
-            (value, Some(carry))
+            (value, if shift_amount != 0 { Some(carry) } else { None })
         }
         DataProcessingOperand::ImmediateShiftedRegister {
             operand_register,
@@ -389,7 +400,16 @@ pub fn execute_data_processing<BusType: SystemBus>(
             shift_type,
         } => {
             let value = cpu.registers[operand_register];
-            let (value, carry) = shift(shift_type, value, shift_amount);
+            let (value, carry) = shift(
+                shift_type,
+                value,
+                // ASR#32 is encoded as ASR#0
+                if shift_type == ShiftType::Asr && shift_amount == 0 {
+                    32
+                } else {
+                    shift_amount
+                },
+            );
             (value, Some(carry))
         }
     };
@@ -438,8 +458,6 @@ pub fn execute_data_processing<BusType: SystemBus>(
         }
     }
 
-    cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
-
     if rd == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
@@ -451,10 +469,16 @@ pub fn execute_data_processing<BusType: SystemBus>(
             && sub_opcode != DataProcessingOpcode::CMN
         {
             cpu.reload_pipeline(bus);
-        } else {
+        } else if !matches!(
+            operand,
+            DataProcessingOperand::RegisterShiftedRegister { .. }
+        ) {
             cpu.registers.get_and_incr_pc(4);
         }
-    } else {
+    } else if !matches!(
+        operand,
+        DataProcessingOperand::RegisterShiftedRegister { .. }
+    ) {
         cpu.registers.get_and_incr_pc(4);
     }
 }

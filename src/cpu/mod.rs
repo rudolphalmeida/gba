@@ -81,6 +81,9 @@ impl Arm7Cpu {
         self.registers[PC_IDX] &= !1;
 
         self.pipeline[0] = self.pipeline[1];
+        // The corresponding PC increment is implemented in the opcodes. Since this fetch and the
+        // execution happen in parallel and the execution functions need to see the proper PC value
+        // it seems not possible to have a general increment here
         self.pipeline[1] = bus.read_word(self.registers[PC_IDX], self.next_access);
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
@@ -119,12 +122,14 @@ impl Arm7Cpu {
 
 #[cfg(test)]
 mod tests {
+
     use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
     use crate::system_bus::{SystemBus, ACCESS_CODE};
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fs::File;
+    use std::io::BufReader;
     use test_case::test_case;
 
     #[test]
@@ -270,8 +275,10 @@ mod tests {
     }
 
     fn read_test_data(test_name: &'static str) -> Vec<TestState> {
-        serde_json::from_reader(File::open(format!("./ARM7TDMI/v1/{test_name}.json")).unwrap())
-            .unwrap()
+        serde_json::from_reader(BufReader::new(
+            File::open(format!("./ARM7TDMI/v1/{test_name}.json")).unwrap(),
+        ))
+        .unwrap()
     }
 
     fn cpu_with_state(state: &TestCpuState) -> Arm7Cpu {
