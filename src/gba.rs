@@ -1,11 +1,14 @@
 use crate::cpu::Arm7Cpu;
-use crate::gamepak::Gamepak;
+use crate::events::EventBus;
+use crate::gamepak::{GamePakHeader, Gamepak};
 use crate::system_bus::Bus;
 use std::path::Path;
 
 pub struct Gba {
     system_bus: Bus,
     cpu: Arm7Cpu,
+    pub header: GamePakHeader,
+    pub event_bus: EventBus,
 }
 
 impl Gba {
@@ -24,15 +27,21 @@ impl Gba {
         log::info!("Maker Code: {}", gamepak.header.maker_code);
         log::info!("ROM size: {} bytes", gamepak.rom.len());
 
+        let header = gamepak.header.clone();
         let bios = std::fs::read(bios_path).map_err(|e| e.to_string())?;
         let system_bus = Bus::new(gamepak, bios);
         let cpu = Arm7Cpu::new();
         log::debug!("Initialized CPU");
 
-        Ok(Self { system_bus, cpu })
+        Ok(Self {
+            system_bus,
+            cpu,
+            header,
+            event_bus: EventBus::new(),
+        })
     }
 
     pub fn step(&mut self) {
-        self.cpu.step(&mut self.system_bus);
+        self.cpu.step(&mut self.system_bus, &self.event_bus);
     }
 }
