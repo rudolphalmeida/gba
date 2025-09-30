@@ -1,6 +1,6 @@
 use crate::cpu::opcodes::{
     check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_data_processing, DecodedArmOpcode, Opcode,
+    execute_block_data_transfer, execute_data_processing, DecodedArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
@@ -116,6 +116,25 @@ impl Arm7Cpu {
                 operand,
                 set_flags,
             } => execute_data_processing(self, bus, sub_opcode, rd, rn, operand, set_flags),
+            DecodedArmOpcode::BlockDataTransfer {
+                base_register,
+                transfer_type,
+                pre_increment,
+                increment,
+                psr_n_force_user,
+                write_address_into_base,
+                rlist,
+            } => execute_block_data_transfer(
+                self,
+                bus,
+                base_register,
+                transfer_type,
+                pre_increment,
+                increment,
+                psr_n_force_user,
+                write_address_into_base,
+                rlist,
+            ),
         }
     }
 }
@@ -581,6 +600,7 @@ mod tests {
     #[test_case("arm_data_proc_immediate")]
     #[test_case("arm_data_proc_immediate_shift")]
     #[test_case("arm_data_proc_register_shift")]
+    #[test_case("arm_ldm_stm")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 

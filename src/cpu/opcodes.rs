@@ -7,7 +7,12 @@ use super::registers::CondFlag;
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     // TODO: This is possibly a slow decoding scheme. Try a LUT?
 
-    let decoders = [try_decode_b_bl, try_decode_bx, try_decode_data_processing];
+    let decoders = [
+        try_decode_b_bl,
+        try_decode_bx,
+        try_decode_data_processing,
+        try_decode_ldm_stm,
+    ];
 
     for decoder in decoders {
         if let Some(decoded_opcode) = decoder(opcode) {
@@ -120,6 +125,12 @@ pub enum DataProcessingOperand {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum BlockTransferType {
+    STM = 0,
+    LDM = 1,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum DecodedArmOpcode {
     B {
         offset: u32,
@@ -141,6 +152,17 @@ pub enum DecodedArmOpcode {
         sub_opcode: DataProcessingOpcode,
         set_flags: bool,
     },
+
+    // LDM & STM
+    BlockDataTransfer {
+        base_register: usize,
+        transfer_type: BlockTransferType,
+        pre_increment: bool,    // Add offset before transfer. False implies post
+        increment: bool,        // Offset adds. False implies down i.e. subtract
+        psr_n_force_user: bool, // Load PSR or force user mode
+        write_address_into_base: bool,
+        rlist: u16,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -149,6 +171,7 @@ pub enum Opcode {
     Thumb,
 }
 
+// B, BL
 fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
     if opcode & 0xE000000 != 0xA000000 {
         return None;
@@ -594,4 +617,46 @@ fn execute_bic(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, b
 fn execute_mvn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, bool, bool) {
     cpu.registers[rd] = !operand;
     (cpu.registers[rd], false, false)
+}
+
+// Block Data Transfer (LDM, STM)
+fn try_decode_ldm_stm(opcode: u32) -> Option<DecodedArmOpcode> {
+    if opcode & 0x0E000000 != 0x08000000 {
+        return None;
+    }
+
+    let pre_increment = opcode & 0x1000000 == 0x1000000;
+    let increment = opcode & 0x800000 == 0x800000;
+    let psr_n_force_user = opcode & 0x400000 == 0x400000;
+    let write_address_into_base = opcode & 0x200000 == 0x200000;
+    let transfer_type = if opcode & 0x100000 == 0x100000 {
+        BlockTransferType::LDM
+    } else {
+        BlockTransferType::STM
+    };
+    let base_register = (opcode as usize & 0xF0000) >> 16;
+    let rlist = opcode as u16;
+
+    Some(DecodedArmOpcode::BlockDataTransfer {
+        transfer_type,
+        pre_increment,
+        increment,
+        psr_n_force_user,
+        write_address_into_base,
+        base_register,
+        rlist,
+    })
+}
+
+pub fn execute_block_data_transfer<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    base_register: usize,
+    transfer_type: BlockTransferType,
+    pre_increment: bool,
+    increment: bool,
+    psr_n_force_user: bool,
+    write_address_into_base: bool,
+    rlist: u16,
+) {
 }
