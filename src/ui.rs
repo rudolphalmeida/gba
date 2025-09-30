@@ -1,7 +1,10 @@
 use circular_buffer::CircularBuffer;
+use gba::cpu::disasm::disassemble_opcode;
 use gba::cpu::opcodes::Opcode;
+use gba::cpu::EXECUTED_OPCODE_EVENT_ID;
+use gba::events::Event;
 use gba::gba::Gba;
-use iced::widget::button;
+use iced::widget::{button, Column};
 use iced::Alignment::Center;
 use iced::Length::Fill;
 use iced::{
@@ -9,14 +12,15 @@ use iced::{
     Element, Theme,
 };
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-trait Page {
+pub trait Page {
     fn update(&mut self, message: AppMessage) -> Option<Box<dyn Page>>;
     fn view(&self) -> iced::Element<'_, AppMessage>;
 }
 
-pub struct App {
-    page: Box<dyn Page>,
+pub fn boot_page() -> Box<dyn Page> {
+    Box::new(SelectFilePage::default())
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -25,36 +29,26 @@ pub(crate) enum AppMessage {
     PlayRomMessage(PlayRomMessage),
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            page: Box::new(SelectFilePage::default()),
+pub fn title(_: &Box<dyn Page>) -> String {
+    "GBA emulator".to_string()
+}
+
+pub fn theme(_: &Box<dyn Page>) -> Theme {
+    Theme::Dark
+}
+
+pub fn update(page: &mut Box<dyn Page>, message: AppMessage) {
+    match message {
+        message => {
+            if let Some(next_page) = page.update(message) {
+                *page = next_page;
+            }
         }
     }
 }
 
-impl App {
-    pub fn title(&self) -> String {
-        "GBA emulator".to_string()
-    }
-
-    pub fn theme(&self) -> Theme {
-        Theme::Dark
-    }
-
-    pub fn update(&mut self, message: AppMessage) {
-        match message {
-            message => {
-                if let Some(next_page) = self.page.update(message) {
-                    self.page = next_page;
-                }
-            }
-        }
-    }
-
-    pub fn view(&self) -> Element<AppMessage> {
-        self.page.view()
-    }
+pub fn view<'a>(page: &'a Box<dyn Page>) -> Element<'a, AppMessage> {
+    page.view()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -160,7 +154,7 @@ struct PlayRomPage {
     gba: Gba,
 
     // Information for the debug UIs
-    executed_opcodes: CircularBuffer<10, Opcode>,
+    executed_opcodes: Arc<Mutex<CircularBuffer<10, Opcode>>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -170,11 +164,35 @@ pub(crate) enum PlayRomMessage {
 
 impl PlayRomPage {
     pub fn new(bios_path: &dyn AsRef<Path>, rom_path: &dyn AsRef<Path>) -> Result<Self, String> {
-        let gba = Gba::new(rom_path, bios_path)?;
+        let mut gba = Gba::new(rom_path, bios_path)?;
+
+        let executed_opcodes = Arc::new(Mutex::new(CircularBuffer::new()));
+
+        let executed_opcodes_buffer = executed_opcodes.clone();
+        gba.event_bus.register_handler(
+            EXECUTED_OPCODE_EVENT_ID,
+            Arc::new(move |event: &dyn Event| {
+                let opcode = *event.payload().unwrap().get_ref::<Opcode>().unwrap();
+                executed_opcodes_buffer.lock().unwrap().push_back(opcode);
+            }),
+        );
+
         Ok(Self {
             gba,
-            executed_opcodes: CircularBuffer::new(),
+            executed_opcodes,
         })
+    }
+
+    fn executed_opcodes_view(&self) -> iced::Element<'_, AppMessage> {
+        let ops = self
+            .executed_opcodes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|opcode| text(disassemble_opcode(opcode)).into())
+            .collect();
+
+        Column::from_vec(ops).into()
     }
 }
 
@@ -195,6 +213,7 @@ impl Page for PlayRomPage {
             button("Step").on_press(AppMessage::PlayRomMessage(
                 PlayRomMessage::StepSingleInstruction
             )),
+            self.executed_opcodes_view(),
         ]
         .into()
     }

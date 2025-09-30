@@ -120,7 +120,6 @@ pub enum DataProcessingOperand {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[derive(Debug, Clone, Copy)]
 pub enum DecodedArmOpcode {
     B {
         offset: u32,

@@ -1,9 +1,10 @@
-use crate::ui::App;
+use crate::ui::{boot_page, theme, title, update, view};
 
 mod ui;
 
 fn main() -> iced::Result {
-    iced::application(App::title, App::update, App::view)
-        .theme(App::theme)
+    iced::application(boot_page, update, view)
+        .title(title)
+        .theme(theme)
         .run()
 }
