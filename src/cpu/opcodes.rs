@@ -24,6 +24,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
 }
 
 #[repr(u8)]
+#[derive(Debug, Clone, Copy)]
 pub enum Condition {
     Equal = 0x0,
     NotEqual = 0x1,
@@ -43,8 +44,12 @@ pub enum Condition {
     Never = 0xF,
 }
 
+pub fn condition_from_opcode(opcode: u32) -> Condition {
+    unsafe { std::mem::transmute::<u8, Condition>((opcode >> 28) as u8) }
+}
+
 pub fn check_condition(registers: &RegisterFile, opcode: u32) -> bool {
-    let condition = unsafe { std::mem::transmute::<u8, Condition>((opcode >> 28) as u8) };
+    let condition = condition_from_opcode(opcode);
 
     let zero = registers.zero();
     let carry = registers.carry();
@@ -326,7 +331,7 @@ fn asr(value: u32, amount: u32) -> u32 {
     (value as i32).unbounded_shr(amount) as u32
 }
 
-fn ror(value: u32, amount: u32) -> u32 {
+pub(crate) fn ror(value: u32, amount: u32) -> u32 {
     value.rotate_right(amount)
 }
 

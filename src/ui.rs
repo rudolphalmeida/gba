@@ -1,7 +1,7 @@
 use circular_buffer::CircularBuffer;
 use gba::cpu::disasm::disassemble_opcode;
 use gba::cpu::opcodes::Opcode;
-use gba::cpu::EXECUTED_OPCODE_EVENT_ID;
+use gba::cpu::{ExecutedOpcodePayload, EXECUTED_OPCODE_EVENT_ID};
 use gba::events::Event;
 use gba::gba::Gba;
 use iced::widget::{button, Column};
@@ -154,7 +154,7 @@ struct PlayRomPage {
     gba: Gba,
 
     // Information for the debug UIs
-    executed_opcodes: Arc<Mutex<CircularBuffer<10, Opcode>>>,
+    executed_opcodes: Arc<Mutex<CircularBuffer<10, ExecutedOpcodePayload>>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -172,7 +172,11 @@ impl PlayRomPage {
         gba.event_bus.register_handler(
             EXECUTED_OPCODE_EVENT_ID,
             Arc::new(move |event: &dyn Event| {
-                let opcode = *event.payload().unwrap().get_ref::<Opcode>().unwrap();
+                let opcode = *event
+                    .payload()
+                    .unwrap()
+                    .get_ref::<ExecutedOpcodePayload>()
+                    .unwrap();
                 executed_opcodes_buffer.lock().unwrap().push_back(opcode);
             }),
         );
@@ -189,7 +193,7 @@ impl PlayRomPage {
             .lock()
             .unwrap()
             .iter()
-            .map(|opcode| text(disassemble_opcode(opcode)).into())
+            .map(|opcode| text(disassemble_opcode(&opcode.opcode)).into())
             .collect();
 
         Column::from_vec(ops).into()

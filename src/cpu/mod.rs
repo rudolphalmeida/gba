@@ -1,6 +1,7 @@
 use crate::cpu::opcodes::{
-    check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_block_data_transfer, execute_data_processing, DecodedArmOpcode, Opcode,
+    check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b,
+    execute_bl, execute_block_data_transfer, execute_data_processing, Condition, DecodedArmOpcode,
+    Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::events::{Event, EventBus, EventId, Payload};
@@ -90,9 +91,10 @@ impl Arm7Cpu {
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
             if check_condition(&self.registers, execute_opcode) {
-                let event = ExecutedOpcodeEvent {
-                    opcode: Opcode::Arm(opcode),
-                };
+                let event = ExecutedOpcodeEvent::new(
+                    Opcode::Arm(opcode),
+                    condition_from_opcode(execute_opcode),
+                );
                 event_bus.dispatch(&event);
                 self.execute_arm_opcode(opcode, bus);
             } else {
@@ -149,9 +151,23 @@ impl Arm7Cpu {
 
 pub const EXECUTED_OPCODE_EVENT_ID: EventId = "cpu.executed_opcode";
 
+#[derive(Debug, Clone, Copy)]
+pub struct ExecutedOpcodePayload {
+    pub opcode: Opcode,
+    pub condition: Condition,
+}
+
 #[derive(Debug)]
 pub struct ExecutedOpcodeEvent {
-    opcode: Opcode,
+    payload: ExecutedOpcodePayload,
+}
+
+impl ExecutedOpcodeEvent {
+    pub fn new(opcode: Opcode, condition: Condition) -> Self {
+        Self {
+            payload: ExecutedOpcodePayload { opcode, condition },
+        }
+    }
 }
 
 impl Event for ExecutedOpcodeEvent {
@@ -160,7 +176,7 @@ impl Event for ExecutedOpcodeEvent {
     }
 
     fn payload(&self) -> Option<Payload> {
-        Some(Payload::new(Box::new(self.opcode)))
+        Some(Payload::new(Box::new(self.payload)))
     }
 }
 
