@@ -82,8 +82,7 @@ mod tests {
         let header = GamePakHeader {
             title: "TEST ROM".to_string(),
             game_code: "TEST".to_string(),
-            maker_code: "RA".to_string(),
-        };
+            maker_code: "RA".to_string(),        };
         let rom = vec![0x00; 0x4000];
         Gamepak { header, rom }
     }

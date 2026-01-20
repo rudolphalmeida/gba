@@ -1,6 +1,7 @@
 use crate::cpu::registers::{CpuState, RegisterFile, PC_IDX};
 use crate::cpu::Arm7Cpu;
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
+use std::cmp::PartialEq;
 
 use super::registers::CondFlag;
 
@@ -129,7 +130,7 @@ pub enum DataProcessingOperand {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlockTransferType {
     STM = 0,
     LDM = 1,
@@ -662,6 +663,64 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     increment: bool,
     psr_n_force_user: bool,
     write_address_into_base: bool,
-    rlist: u16,
+    mut rlist: u16,
 ) {
+    let mut words_to_transfer = rlist.count_ones();
+
+    if words_to_transfer == 0 {
+        rlist = 1 << 15; // Empty Rlist does R15 on ARMv4
+        words_to_transfer = 1;
+        // TODO: Modify Rb=Rb+/-40
+    }
+
+    let rb_in_rlist = rlist & (1 << base_register) != 0;
+    let rb_first_in_rlist = if rb_in_rlist {
+        (rlist.trailing_zeros() + 1) == base_register as u32
+    } else {
+        false
+    };
+
+    let mut base_address = if increment {
+        cpu.registers[base_register]
+    } else {
+        cpu.registers[base_register] - ((words_to_transfer - 1) << 2)
+    };
+    if pre_increment {
+        base_address = if increment {
+            base_address + 4
+        } else {
+            base_address - 4
+        };
+    }
+
+    // The first write is non-sequential
+    let mut access = ACCESS_NONSEQ;
+
+    for i in 0..16 {
+        if rlist & (1 << i) == 0 {
+            continue;
+        }
+
+        match transfer_type {
+            BlockTransferType::STM => bus.write_word(base_address, cpu.registers[i], access),
+            BlockTransferType::LDM => {
+                let value = bus.read_word(base_address, access);
+                cpu.registers[i] = value;
+            }
+        }
+
+        base_address += 4;
+        // Every write after the first is sequential
+        access = ACCESS_SEQ;
+
+        if i == PC_IDX {
+            cpu.reload_pipeline(bus);
+        }
+    }
+
+    // Ref: https://rust-console.github.io/gbatek-gbaonly/#strange-effects-on-invalid-rlists
+    // If writeback is enabled, however opcode is LDM and Rb is in Rlist -> No writeback
+    if write_address_into_base && !(transfer_type == BlockTransferType::LDM && rb_in_rlist) {
+        cpu.registers[base_register] = base_address;
+    }
 }

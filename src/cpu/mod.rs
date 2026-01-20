@@ -283,24 +283,35 @@ mod tests {
     }
 
     impl<'a> SystemBus for TransactionSystemBus<'a> {
-        fn read_word(&mut self, mut address: u32, access: u8) -> u32 {
-            address &= !3;
+        fn idle(&mut self) {}
+
+        fn read_word(&mut self, address: u32, access: u8) -> u32 {
             if access & ACCESS_CODE != ACCESS_CODE {
                 return if let Some(transaction) = self.find_transaction_for_addr(address) {
+                    assert!(transaction.kind == 0 || transaction.kind == 1);  //Code read or data read
                     transaction.data
                 } else {
-                    address
+                    self.next_index += 1;
+                    address & !3
                 };
             }
             if address == self.test_state.base_addr {
+                self.next_index += 1;
                 self.test_state.opcode
             } else {
-                address
+                self.next_index += 1;
+                address & !3
             }
         }
 
-        fn write_word(&mut self, address: u32, data: u32, _access: u8) {
-            todo!()
+        fn write_word(&mut self, address: u32, data: u32, access: u8) {
+            if let Some(transaction) = self.find_transaction_for_addr(address) {
+                assert_eq!(transaction.kind, 2); // 2 is write for ARM7TDMI tests
+                assert_eq!(transaction.data, data);
+                assert_eq!(transaction.access as u8, access);
+            } else {
+                panic!("No matching write transaction for address {address:#010X} found");
+            }
         }
 
         fn read_half_word(&mut self, mut address: u32, access: u8) -> u16 {
@@ -322,8 +333,6 @@ mod tests {
         fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
             todo!()
         }
-
-        fn idle(&mut self) {}
     }
 
     #[derive(Serialize, Deserialize)]
@@ -673,5 +682,10 @@ mod tests {
         }
 
         assert_eq!(opcode_failures.len(), 0);
+    }
+
+    #[test]
+    fn test_ldm() {
+        test_arm_opcode("arm_ldm_stm");
     }
 }

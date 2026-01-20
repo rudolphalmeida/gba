@@ -1,6 +1,5 @@
 use circular_buffer::CircularBuffer;
 use gba::cpu::disasm::disassemble_opcode;
-use gba::cpu::opcodes::Opcode;
 use gba::cpu::{ExecutedOpcodePayload, EXECUTED_OPCODE_EVENT_ID};
 use gba::events::Event;
 use gba::gba::Gba;
@@ -16,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 pub trait Page {
     fn update(&mut self, message: AppMessage) -> Option<Box<dyn Page>>;
-    fn view(&self) -> iced::Element<'_, AppMessage>;
+    fn view(&self) -> Element<'_, AppMessage>;
 }
 
 pub fn boot_page() -> Box<dyn Page> {
@@ -187,7 +186,7 @@ impl PlayRomPage {
         })
     }
 
-    fn executed_opcodes_view(&self) -> iced::Element<'_, AppMessage> {
+    fn executed_opcodes_view(&self) -> Element<'_, AppMessage> {
         let ops = self
             .executed_opcodes
             .lock()
@@ -211,7 +210,7 @@ impl Page for PlayRomPage {
         None
     }
 
-    fn view(&self) -> iced::Element<'_, AppMessage> {
+    fn view(&self) -> Element<'_, AppMessage> {
         column![
             text(format!("{:?}", self.gba.header)),
             button("Step").on_press(AppMessage::PlayRomMessage(
