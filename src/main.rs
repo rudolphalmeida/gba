@@ -1,10 +1,19 @@
-use crate::ui::{boot_page, theme, title, update, view};
+use eframe::egui;
+
+use crate::ui::GbaApp;
 
 mod ui;
 
-fn main() -> iced::Result {
-    iced::application(boot_page, update, view)
-        .title(title)
-        .theme(theme)
-        .run()
+fn main() -> eframe::Result {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "rGBA",
+        options,
+        Box::new(|cc| {
+            Ok(Box::<GbaApp>::default())
+        }),
+    )
 }
