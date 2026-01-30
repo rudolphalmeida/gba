@@ -665,6 +665,8 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     write_address_into_base: bool,
     mut rlist: u16,
 ) {
+    cpu.registers.get_and_incr_pc(4);
+
     let mut words_to_transfer = rlist.count_ones();
 
     if words_to_transfer == 0 {
@@ -694,7 +696,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     }
 
     // The first write is non-sequential
-    let mut access = ACCESS_NONSEQ;
+    cpu.next_access = ACCESS_NONSEQ;
 
     for i in 0..16 {
         if rlist & (1 << i) == 0 {
@@ -702,18 +704,26 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
         }
 
         match transfer_type {
-            BlockTransferType::STM => bus.write_word(base_address, cpu.registers[i], access),
+            BlockTransferType::STM => {
+                // Ref: https://rust-console.github.io/gbatek-gbaonly/#strange-effects-on-invalid-rlists
+                // Writeback with Rb included in Rlist: Store OLD base if Rb is FIRST entry in
+                // Rlist, otherwise store NEW base (STM/ARMv4)
+                let data = if i == base_register && !rb_first_in_rlist {
+                    cpu.registers[i] + (words_to_transfer * 4)
+                } else { cpu.registers[i] };
+                bus.write_word(base_address, data, cpu.next_access)
+            },
             BlockTransferType::LDM => {
-                let value = bus.read_word(base_address, access);
+                let value = bus.read_word(base_address, cpu.next_access);
                 cpu.registers[i] = value;
             }
         }
 
         base_address += 4;
         // Every write after the first is sequential
-        access = ACCESS_SEQ;
+        cpu.next_access = ACCESS_SEQ;
 
-        if i == PC_IDX {
+        if i == PC_IDX && transfer_type == BlockTransferType::LDM {
             cpu.reload_pipeline(bus);
         }
     }
