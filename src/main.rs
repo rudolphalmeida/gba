@@ -12,8 +12,8 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "rGBA",
         options,
-        Box::new(|_cc| {
-            Ok(Box::new(GbaApp::new()))
+        Box::new(|cc| {
+            Ok(Box::new(GbaApp::new(cc)))
         }),
     )
 }

@@ -1,10 +1,9 @@
 use crate::cpu::opcodes::{
-    check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b,
-    execute_bl, execute_block_data_transfer, execute_data_processing, Condition, DecodedArmOpcode,
+    check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b,
+    execute_bl, execute_block_data_transfer, execute_data_processing, DecodedArmOpcode,
     Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
-use crate::events::{Event, EventBus, EventId, Payload};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use registers::RegisterFile;
 
@@ -71,14 +70,14 @@ impl Arm7Cpu {
         // TODO: IRQ disable
     }
 
-    pub fn step<BusType: SystemBus>(&mut self, bus: &mut BusType, event_bus: &EventBus) {
+    pub fn step<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         match self.registers.state() {
-            CpuState::Arm => self.execute_next_arm(bus, event_bus),
+            CpuState::Arm => self.execute_next_arm(bus),
             CpuState::Thumb => todo!(),
         }
     }
 
-    fn execute_next_arm<BusType: SystemBus>(&mut self, bus: &mut BusType, event_bus: &EventBus) {
+    fn execute_next_arm<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let execute_opcode = self.pipeline[0];
 
         self.registers[PC_IDX] &= !1;
@@ -91,11 +90,6 @@ impl Arm7Cpu {
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
             if check_condition(&self.registers, execute_opcode) {
-                let event = ExecutedOpcodeEvent::new(
-                    Opcode::Arm(opcode),
-                    condition_from_opcode(execute_opcode),
-                );
-                event_bus.dispatch(&event);
                 self.execute_arm_opcode(opcode, bus);
             } else {
                 bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE);
@@ -147,45 +141,10 @@ impl Arm7Cpu {
     }
 }
 
-// CPU events
-
-pub const EXECUTED_OPCODE_EVENT_ID: EventId = "cpu.executed_opcode";
-
-#[derive(Debug, Clone, Copy)]
-pub struct ExecutedOpcodePayload {
-    pub opcode: Opcode,
-    pub condition: Condition,
-}
-
-#[derive(Debug)]
-pub struct ExecutedOpcodeEvent {
-    payload: ExecutedOpcodePayload,
-}
-
-impl ExecutedOpcodeEvent {
-    pub fn new(opcode: Opcode, condition: Condition) -> Self {
-        Self {
-            payload: ExecutedOpcodePayload { opcode, condition },
-        }
-    }
-}
-
-impl Event for ExecutedOpcodeEvent {
-    fn event_id(&self) -> crate::events::EventId {
-        EXECUTED_OPCODE_EVENT_ID
-    }
-
-    fn payload(&self) -> Option<Payload> {
-        Some(Payload::new(Box::new(self.payload)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-
     use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
-    use crate::events::EventBus;
     use crate::system_bus::{SystemBus, ACCESS_CODE};
     use serde::{Deserialize, Serialize};
     use serde_json;
@@ -664,9 +623,8 @@ mod tests {
                 next_index: 0,
             };
             let mut cpu = cpu_with_state(&test_case.initial);
-            let event_bus = EventBus::new();
 
-            cpu.execute_next_arm(&mut bus, &event_bus);
+            cpu.execute_next_arm(&mut bus);
             compare_cpu_with_state(
                 test_case.opcode,
                 &cpu,

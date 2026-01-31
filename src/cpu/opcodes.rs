@@ -151,7 +151,7 @@ pub enum DecodedArmOpcode {
     // Data processing group
     DataProcessing {
         operand: DataProcessingOperand,
-        /// Destination register index. Can be `PC_IDX` in which case the behaviour of the opcode changes
+        /// Destination register index. Can be `PC_IDX` in which case the behavior of the opcode changes
         rd: usize,
         /// First operand register index
         rn: usize,

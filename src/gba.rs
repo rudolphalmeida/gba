@@ -1,5 +1,4 @@
 use crate::cpu::Arm7Cpu;
-use crate::events::EventBus;
 use crate::gamepak::{GamePakHeader, Gamepak};
 use crate::system_bus::Bus;
 use std::path::Path;
@@ -8,7 +7,6 @@ pub struct Gba {
     system_bus: Bus,
     cpu: Arm7Cpu,
     pub header: GamePakHeader,
-    pub event_bus: EventBus,
 }
 
 impl Gba {
@@ -37,11 +35,10 @@ impl Gba {
             system_bus,
             cpu,
             header,
-            event_bus: EventBus::new(),
         })
     }
 
     pub fn step(&mut self) {
-        self.cpu.step(&mut self.system_bus, &self.event_bus);
+        self.cpu.step(&mut self.system_bus);
     }
 }
