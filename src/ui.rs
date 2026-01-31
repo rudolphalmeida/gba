@@ -12,8 +12,6 @@ pub struct GbaApp {
     #[serde(skip)]
     rom_path: Option<PathBuf>,
     bios_path: Option<PathBuf>,
-
-    show_opcode_tracer: bool,
 }
 
 impl GbaApp {
@@ -27,8 +25,6 @@ impl GbaApp {
             gba: None,
             rom_path: None,
             bios_path: None,
-
-            show_opcode_tracer: true,
         }
     }
 
@@ -38,7 +34,9 @@ impl GbaApp {
         });
 
         if let Some(gba) = self.gba.as_mut() {
-            self.trace_opcode_viewer.render_ui(gba);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                self.trace_opcode_viewer.render_ui(ui, ctx, gba);
+            });
         } else {
         }
     }
@@ -72,6 +70,12 @@ impl GbaApp {
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
+            });
+
+            ui.menu_button("Debug", |ui| {
+                if ui.button("Trace").clicked() {
+                    self.trace_opcode_viewer.toggle_is_open();
+                }
             })
         });
     }
@@ -89,14 +93,20 @@ impl eframe::App for GbaApp {
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
-struct TraceOpcodeViewer;
+struct TraceOpcodeViewer {
+    is_open: bool,
+}
 
 impl TraceOpcodeViewer {
     pub fn new() -> Self {
-        Self {}
+        Self { is_open: true }
     }
 
-    pub fn render_ui(&mut self, gba: &Gba) {
-        // egui::Window::new("Opcode trace").vscroll(true).open(true).show(ui, |ui| egui::Label::new("Opcodes"))
+    pub fn toggle_is_open(&mut self) {
+        self.is_open = !self.is_open;
+    }
+
+    pub fn render_ui(&mut self, _ui: &mut egui::Ui, ctx: &Context, gba: &Gba) {
+        egui::Window::new("Opcode trace").vscroll(true).open(&mut self.is_open).show(ctx, |_ui| egui::Label::new("Opcodes"));
     }
 }
