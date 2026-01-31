@@ -2,6 +2,7 @@ use eframe::egui::Context;
 use eframe::{egui, CreationContext, Frame};
 use gba::gba::Gba;
 use std::path::PathBuf;
+use gba::cpu::disasm::disassemble_opcode;
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct GbaApp {
@@ -106,7 +107,24 @@ impl TraceOpcodeViewer {
         self.is_open = !self.is_open;
     }
 
-    pub fn render_ui(&mut self, _ui: &mut egui::Ui, ctx: &Context, gba: &Gba) {
-        egui::Window::new("Opcode trace").vscroll(true).open(&mut self.is_open).show(ctx, |_ui| egui::Label::new("Opcodes"));
+    pub fn render_ui(&mut self, _ui: &mut egui::Ui, ctx: &Context, gba: &mut Gba) {
+        egui::Window::new("Opcode trace").vscroll(true).open(&mut self.is_open).show(ctx, |ui| {
+            let opcodes = &gba.cpu.opcode_traces;
+
+            egui::Grid::new("opcodes_trace").num_columns(2).spacing([40.0, 4.0]).striped(true).show(ui, |ui| {
+                for opcode in opcodes {
+                    ui.add(|ui: &mut egui::Ui| ui.label(format!("{}", opcode.address)));
+                    ui.add(|ui: &mut egui::Ui| ui.label(disassemble_opcode(&opcode.opcode)));
+                    ui.end_row();
+                }
+            });
+
+            ui.separator();
+
+            if ui.button("Step").clicked() {
+                gba.step();
+            }
+
+        });
     }
 }

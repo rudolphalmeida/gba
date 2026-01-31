@@ -1,8 +1,5 @@
-use crate::cpu::opcodes::{
-    check_condition, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b,
-    execute_bl, execute_block_data_transfer, execute_data_processing, DecodedArmOpcode,
-    Opcode,
-};
+use circular_buffer::CircularBuffer;
+use crate::cpu::opcodes::{check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer, execute_data_processing, Condition, DecodedArmOpcode, Opcode};
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use registers::RegisterFile;
@@ -11,7 +8,7 @@ pub mod disasm;
 pub mod opcodes;
 pub mod registers;
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Arm7Cpu {
     registers: RegisterFile,
     /// The ARM7TDMI has a 3 stage pipeline. The opcode to execute is taken from
@@ -20,16 +17,20 @@ pub struct Arm7Cpu {
     /// - Fetch - 1
     /// - Decode - 0
     /// - Execute - 0 pre-fetch
-    pipeline: [u32; 2],
+    pipeline: [(u32, u32); 2],
     next_access: u8,
+
+    pub opcode_traces: CircularBuffer<20, ExecutedOpcode>,
 }
 
 impl Arm7Cpu {
     pub fn new() -> Self {
         Self {
             registers: RegisterFile::default(),
-            pipeline: [0; 2],
+            pipeline: [(0, 0); 2],
             next_access: ACCESS_CODE,
+
+            opcode_traces: CircularBuffer::new(),
         }
     }
 
@@ -54,17 +55,21 @@ impl Arm7Cpu {
     }
 
     fn reload_pipeline16<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        let addr = self.registers[PC_IDX];
         self.pipeline[0] =
-            bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32;
+            (addr, bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32);
+        let addr = self.registers[PC_IDX];
         self.pipeline[1] =
-            bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32;
+            (addr, bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32);
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
     }
 
     fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
-        self.pipeline[0] = bus.read_word(self.registers.get_and_incr_pc(4), self.next_access);
+        let addr = self.registers[PC_IDX];
+        self.pipeline[0] = (addr, bus.read_word(self.registers.get_and_incr_pc(4), self.next_access));
+        let addr = self.registers[PC_IDX];
         self.pipeline[1] =
-            bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ);
+            (addr, bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ));
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
 
         // TODO: IRQ disable
@@ -78,7 +83,7 @@ impl Arm7Cpu {
     }
 
     fn execute_next_arm<BusType: SystemBus>(&mut self, bus: &mut BusType) {
-        let execute_opcode = self.pipeline[0];
+        let (execute_address, execute_opcode) = self.pipeline[0];
 
         self.registers[PC_IDX] &= !1;
 
@@ -86,15 +91,25 @@ impl Arm7Cpu {
         // The corresponding PC increment is implemented in the opcodes. Since this fetch and the
         // execution happen in parallel and the execution functions need to see the proper PC value
         // it seems not possible to have a general increment here
-        self.pipeline[1] = bus.read_word(self.registers[PC_IDX], self.next_access);
+        self.pipeline[1] = (self.registers[PC_IDX], bus.read_word(self.registers[PC_IDX], self.next_access));
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
+            let mut execution_log = ExecutedOpcode {
+                opcode: Opcode::Arm(opcode),
+                condition: condition_from_opcode(execute_opcode),
+                address: execute_address,
+                did_execute: false,
+            };
             if check_condition(&self.registers, execute_opcode) {
                 self.execute_arm_opcode(opcode, bus);
+                execution_log.did_execute = true;
             } else {
                 bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE);
                 self.next_access = ACCESS_CODE | ACCESS_SEQ;
+                execution_log.did_execute = false;
             }
+
+            self.opcode_traces.push_back(execution_log);
         } else {
             eprintln!("Failed to decode opcode {execute_opcode:#08X}");
         }
@@ -141,6 +156,15 @@ impl Arm7Cpu {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ExecutedOpcode {
+    pub opcode: Opcode,
+    pub condition: Condition,
+    pub address: u32,
+    // Whether the condition was met or not
+    pub did_execute: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
@@ -150,6 +174,7 @@ mod tests {
     use serde_json;
     use std::fs::File;
     use std::io::BufReader;
+    use circular_buffer::CircularBuffer;
     use test_case::test_case;
 
     #[test]
@@ -332,8 +357,11 @@ mod tests {
 
         Arm7Cpu {
             registers,
-            pipeline: state.pipeline,
+            // The actual addresses do not matter for tests
+            pipeline: [(0, state.pipeline[0]), (0, state.pipeline[1])],
             next_access: state.access,
+
+            opcode_traces: CircularBuffer::new(),
         }
     }
 
@@ -572,24 +600,24 @@ mod tests {
         }
 
         // Pipeline
-        if cpu.pipeline[0] != state.pipeline[0] {
+        if cpu.pipeline[0].1 != state.pipeline[0] {
             failures.push((
                 opcode,
                 OpcodeExecFailure::PipelineMismatch {
                     index: 0,
                     expected: state.pipeline[0],
-                    actual: cpu.pipeline[0],
+                    actual: cpu.pipeline[0].1,
                 },
             ));
         }
 
-        if cpu.pipeline[1] != state.pipeline[1] {
+        if cpu.pipeline[1].1 != state.pipeline[1] {
             failures.push((
                 opcode,
                 OpcodeExecFailure::PipelineMismatch {
                     index: 1,
                     expected: state.pipeline[1],
-                    actual: cpu.pipeline[1],
+                    actual: cpu.pipeline[1].1,
                 },
             ));
         }

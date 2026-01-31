@@ -31,7 +31,7 @@ fn format_decoded_arm_opcode(opcode: &DecodedArmOpcode) -> String {
             psr_n_force_user,
             write_address_into_base,
             rlist,
-        } => todo!(),
+        } => "LDM/STM".to_string(),
     }
 }
 
@@ -40,7 +40,7 @@ fn format_register(idx: usize) -> String {
         0..=13 => format!("R{}", idx),
         14 => "LR".to_string(),
         15 => "PC".to_string(),
-        _ => "UNKN".to_string(), // Should not happen
+        _ => "UNKNOWN".to_string(), // Should not happen
     }
 }
 
@@ -78,11 +78,11 @@ fn format_data_processing_operand(operand: &DataProcessingOperand) -> String {
             operand_register,
             shift_register,
             shift_type,
-        } => todo!(),
+        } => "RegisterShiftedRegister".to_string(),
         DataProcessingOperand::ImmediateShiftedRegister {
             operand_register,
             shift,
             shift_type,
-        } => todo!(),
+        } => "ImmediateShiftedRegister".to_string(),
     }
 }

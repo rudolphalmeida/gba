@@ -5,7 +5,7 @@ use std::path::Path;
 
 pub struct Gba {
     system_bus: Bus,
-    cpu: Arm7Cpu,
+    pub cpu: Arm7Cpu,
     pub header: GamePakHeader,
 }
 
