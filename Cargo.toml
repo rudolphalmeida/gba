@@ -13,7 +13,7 @@ thiserror = "2.0.12"
 serde = { version = "1.0.219", features = ["derive"] }
 test-case = "3.3.1"
 rfd = "0.17.2"
-eframe = "0.33.3"
+eframe = { version = "0.33.3", features = ["persistence"] }
 
 [profile.release]
 codegen-units = 1
