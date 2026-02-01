@@ -1,8 +1,9 @@
-use eframe::egui::Context;
-use eframe::{egui, CreationContext, Frame};
+use eframe::egui::{Align, Context};
+use eframe::{CreationContext, Frame, egui};
+use gba::cpu::disasm::disassemble_opcode;
 use gba::gba::Gba;
 use std::path::PathBuf;
-use gba::cpu::disasm::disassemble_opcode;
+use gba::cpu::OpcodeTraceLog;
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct GbaApp {
@@ -43,7 +44,9 @@ impl GbaApp {
     }
 
     fn begin_rom_if_possible(&mut self) {
-        if let Some(rom) = self.rom_path.as_ref() && let Some(bios) = self.bios_path.as_ref() {
+        if let Some(rom) = self.rom_path.as_ref()
+            && let Some(bios) = self.bios_path.as_ref()
+        {
             self.gba = Some(Gba::new(rom, bios).unwrap())
         }
     }
@@ -90,7 +93,6 @@ impl eframe::App for GbaApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
-
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
@@ -108,23 +110,54 @@ impl TraceOpcodeViewer {
     }
 
     pub fn render_ui(&mut self, _ui: &mut egui::Ui, ctx: &Context, gba: &mut Gba) {
-        egui::Window::new("Opcode trace").vscroll(true).open(&mut self.is_open).show(ctx, |ui| {
-            let opcodes = &gba.cpu.opcode_traces;
+        egui::Window::new("Opcode trace")
+            .vscroll(true)
+            .open(&mut self.is_open)
+            .show(ctx, |ui| {
+                let opcodes = &gba.cpu.opcode_traces;
 
-            egui::Grid::new("opcodes_trace").num_columns(2).spacing([40.0, 4.0]).striped(true).show(ui, |ui| {
-                for opcode in opcodes {
-                    ui.add(|ui: &mut egui::Ui| ui.label(format!("{}", opcode.address)));
-                    ui.add(|ui: &mut egui::Ui| ui.label(disassemble_opcode(&opcode.opcode)));
-                    ui.end_row();
+                egui::Grid::new("opcodes_trace")
+                    .num_columns(2)
+                    .spacing([4.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for opcode in opcodes {
+
+                            match opcode {
+                                OpcodeTraceLog::Decoded(opcode) => {
+                                    ui.add(|ui: &mut egui::Ui| {
+                                        ui.label(format!("{:#08X}", opcode.address))
+                                    });
+                                    ui.add(|ui: &mut egui::Ui| {
+                                        ui.add_sized(
+                                            ui.available_size(),
+                                            egui::Label::new(disassemble_opcode(&opcode.opcode)),
+                                        )
+                                    });
+                                }
+                                OpcodeTraceLog::NotDecoded(execute_address, execute_opcode) => {
+                                    ui.add(|ui: &mut egui::Ui| {
+                                        ui.label(format!("{:#08X}", execute_address))
+                                    });
+                                    ui.add(|ui: &mut egui::Ui| {
+                                        ui.add_sized(
+                                            ui.available_size(),
+                                            egui::Label::new(format!("Failed to decode opcode {:#08X}", execute_opcode)),
+                                        )
+                                    });
+                                }
+                            }
+
+
+                            ui.end_row();
+                        }
+                    });
+
+                ui.separator();
+
+                if ui.button("Step").clicked() {
+                    gba.step();
                 }
             });
-
-            ui.separator();
-
-            if ui.button("Step").clicked() {
-                gba.step();
-            }
-
-        });
     }
 }

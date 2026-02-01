@@ -1,7 +1,7 @@
-use circular_buffer::CircularBuffer;
 use crate::cpu::opcodes::{check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer, execute_data_processing, Condition, DecodedArmOpcode, Opcode};
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
+use circular_buffer::CircularBuffer;
 use registers::RegisterFile;
 
 pub mod disasm;
@@ -20,18 +20,21 @@ pub struct Arm7Cpu {
     pipeline: [(u32, u32); 2],
     next_access: u8,
 
-    pub opcode_traces: CircularBuffer<20, ExecutedOpcode>,
+    pub opcode_traces: CircularBuffer<10, OpcodeTraceLog>,
 }
 
 impl Arm7Cpu {
-    pub fn new() -> Self {
-        Self {
+    pub fn new<BusType: SystemBus>(bus: &mut BusType) -> Self {
+        let mut cpu = Self {
             registers: RegisterFile::default(),
             pipeline: [(0, 0); 2],
             next_access: ACCESS_CODE,
 
             opcode_traces: CircularBuffer::new(),
-        }
+        };
+        cpu.reload_pipeline(bus);
+
+        cpu
     }
 
     fn toggle_cpu_state(&mut self) {
@@ -109,9 +112,9 @@ impl Arm7Cpu {
                 execution_log.did_execute = false;
             }
 
-            self.opcode_traces.push_back(execution_log);
+            self.opcode_traces.push_back(OpcodeTraceLog::Decoded(execution_log));
         } else {
-            eprintln!("Failed to decode opcode {execute_opcode:#08X}");
+            self.opcode_traces.push_back(OpcodeTraceLog::NotDecoded(execute_address, execute_opcode));
         }
     }
 
@@ -165,16 +168,22 @@ pub struct ExecutedOpcode {
     pub did_execute: bool,
 }
 
+#[derive(Debug, Clone)]
+pub enum OpcodeTraceLog {
+    Decoded(ExecutedOpcode),
+    NotDecoded(u32, u32),
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
     use crate::system_bus::{SystemBus, ACCESS_CODE};
+    use circular_buffer::CircularBuffer;
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fs::File;
     use std::io::BufReader;
-    use circular_buffer::CircularBuffer;
     use test_case::test_case;
 
     #[test]

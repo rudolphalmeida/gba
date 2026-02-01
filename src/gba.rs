@@ -27,8 +27,8 @@ impl Gba {
 
         let header = gamepak.header.clone();
         let bios = std::fs::read(bios_path).map_err(|e| e.to_string())?;
-        let system_bus = Bus::new(gamepak, bios);
-        let cpu = Arm7Cpu::new();
+        let mut system_bus = Bus::new(gamepak, bios);
+        let cpu = Arm7Cpu::new(&mut system_bus);
         log::debug!("Initialized CPU");
 
         Ok(Self {
