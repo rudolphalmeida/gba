@@ -23,17 +23,18 @@ pub struct Arm7Cpu {
 }
 
 impl Arm7Cpu {
-    pub fn new<BusType: SystemBus>(bus: &mut BusType) -> Self {
-        let mut cpu = Self {
+    pub fn new() -> Self {
+        Self {
             registers: RegisterFile::default(),
             pipeline: [(0, 0); 2],
             next_access: ACCESS_CODE,
 
             opcode_traces: CircularBuffer::new(),
-        };
-        cpu.reload_pipeline(bus);
+        }
+    }
 
-        cpu
+    pub fn start<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        self.reload_pipeline(bus);
     }
 
     fn toggle_cpu_state(&mut self) {

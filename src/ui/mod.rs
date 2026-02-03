@@ -49,7 +49,8 @@ impl GbaApp {
         if let Some(rom) = self.rom_path.as_ref()
             && let Some(bios) = self.bios_path.as_ref()
         {
-            self.gba = Some(Gba::new(rom, bios).unwrap())
+            self.gba = Some(Gba::new(rom, bios).unwrap());
+            self.gba.as_mut().unwrap().start()
         }
     }
 

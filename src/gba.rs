@@ -27,8 +27,8 @@ impl Gba {
 
         let header = gamepak.header.clone();
         let bios = std::fs::read(bios_path).map_err(|e| e.to_string())?;
-        let mut system_bus = Bus::new(gamepak, bios);
-        let cpu = Arm7Cpu::new(&mut system_bus);
+        let system_bus = Bus::new(gamepak, bios);
+        let cpu = Arm7Cpu::new();
         log::debug!("Initialized CPU");
 
         Ok(Self {
@@ -36,6 +36,11 @@ impl Gba {
             cpu,
             header,
         })
+    }
+
+    pub fn start(&mut self) {
+        //! Start all subcomponents of the system
+        self.cpu.start(&mut self.system_bus);
     }
 
     pub fn step(&mut self) {
