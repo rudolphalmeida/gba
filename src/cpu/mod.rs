@@ -4,7 +4,6 @@ use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use circular_buffer::CircularBuffer;
 use registers::RegisterFile;
 
-pub mod disasm;
 pub mod opcodes;
 pub mod registers;
 

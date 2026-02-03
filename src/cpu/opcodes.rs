@@ -332,7 +332,7 @@ fn asr(value: u32, amount: u32) -> u32 {
     (value as i32).unbounded_shr(amount) as u32
 }
 
-pub(crate) fn ror(value: u32, amount: u32) -> u32 {
+pub fn ror(value: u32, amount: u32) -> u32 {
     value.rotate_right(amount)
 }
 
