@@ -19,6 +19,7 @@ pub struct Arm7Cpu {
     pipeline: [(u32, u32); 2],
     next_access: u8,
 
+    // TODO: Move this to the UI and give it a higher limit
     pub opcode_traces: CircularBuffer<10, OpcodeTraceLog>,
 }
 

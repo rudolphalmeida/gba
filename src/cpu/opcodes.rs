@@ -184,13 +184,14 @@ fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
     }
 
     let mask = 1 << 24;
-    match opcode & mask {
-        0 => Some(DecodedArmOpcode::B {
+    if opcode & mask == mask {
+        Some(DecodedArmOpcode::B {
             offset: opcode & 0xFFFFFF,
-        }),
-        mask => Some(DecodedArmOpcode::BL {
+        })
+    } else {
+        Some(DecodedArmOpcode::BL {
             offset: opcode & 0xFFFFFF,
-        }),
+        })
     }
 }
 

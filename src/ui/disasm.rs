@@ -1,8 +1,6 @@
 use eframe::egui;
 use eframe::egui::{Color32, Response};
-use gba::cpu::opcodes::{
-    DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode, ror,
-};
+use gba::cpu::opcodes::{DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode, ror, Condition};
 
 pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) -> Response {
     ui.horizontal(|ui| match opcode {
@@ -10,6 +8,29 @@ pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) -> Response {
         Opcode::Thumb => ui.label("Thumb disassembly not implemented".to_string()),
     })
     .response
+}
+
+
+// TODO: Get better labels from other emulators
+pub fn condition_text(condition: Condition) -> egui::RichText {
+    egui::RichText::new(match condition {
+        Condition::Equal => "EQ",
+        Condition::NotEqual => "NEQ",
+        Condition::CarrySet => "CS",
+        Condition::CarryCleared => "CC",
+        Condition::Minus => "N",
+        Condition::Positive => "P",
+        Condition::Overflow => "O",
+        Condition::NoOverflow => "NO",
+        Condition::UnsignedHigher => "UH",
+        Condition::UnsignedLowerOrSame => "ULE",
+        Condition::GreaterOrEqual => "GE",
+        Condition::LessThan => "L",
+        Condition::GreaterThan => "G",
+        Condition::LessOrEqual => "LEQ",
+        Condition::Always => "ALWAYS",
+        Condition::Never => "NEVER",
+    })
 }
 
 fn format_decoded_arm_opcode(ui: &mut egui::Ui, opcode: &DecodedArmOpcode) -> Response {
@@ -23,7 +44,7 @@ fn format_decoded_arm_opcode(ui: &mut egui::Ui, opcode: &DecodedArmOpcode) -> Re
             rn,
             sub_opcode,
             set_flags,
-        } => format_data_processing(ui, operand, *rd, *rn, sub_opcode),
+        } => format_data_processing(ui, operand, *rd, *rn, sub_opcode, *set_flags),
         _ => ui.label("Opcode not implemented"),
     }
 
@@ -57,17 +78,20 @@ fn format_opcode_b_bl(ui: &mut egui::Ui, mut offset: u32, is_bl: bool) -> Respon
         // Offset is a 24-bit signed value
         offset |= 0xFF000000; // Sign extend to 32-bits
     }
-    ui.label(
-        egui::RichText::new(if is_bl { "BL" } else { "B" }).color(Color32::from_rgb(70, 70, 245)),
+    // Add 8 because PC is assumed to be leading in the actual opcode
+    offset = offset.wrapping_mul(4).wrapping_add(8);
+    ui.colored_label(
+        Color32::BLUE,
+        if is_bl { "BL" } else { "B" },
     );
-    ui.label(egui::RichText::new(format!("${}", offset as i32)).underline())
+    ui.label(egui::RichText::new(format!("${:X}", offset as i32)).underline())
 }
 
 fn format_opcode_bx(ui: &mut egui::Ui, register_idx: usize) -> Response {
-    ui.label(egui::RichText::new("BX").color(Color32::from_rgb(70, 70, 245)));
-    ui.label(
-        egui::RichText::new(format!("{}", format_register(register_idx)))
-            .color(Color32::from_rgb(120, 240, 80)),
+    ui.colored_label(Color32::BLUE, "BX");
+    ui.colored_label(
+        Color32::GREEN,
+        format!("{}", format_register(register_idx)),
     )
 }
 
@@ -86,9 +110,11 @@ fn format_data_processing(
     rd: usize,
     rn: usize,
     sub_opcode: &DataProcessingOpcode,
+    _set_flags: bool,
 ) -> Response {
-    ui.label(
-        egui::RichText::new(format!("{:?}", sub_opcode)).color(Color32::from_rgb(70, 70, 245)),
+    ui.colored_label(
+        Color32::BLUE,
+        format!("{:?}", sub_opcode),
     );
 
     let register_idx = if *sub_opcode != DataProcessingOpcode::TST
@@ -100,27 +126,30 @@ fn format_data_processing(
     } else {
         rn
     };
-    ui.label(
-        egui::RichText::new(format!("{}", format_register(register_idx)))
-            .color(Color32::from_rgb(120, 240, 80)),
-    )
+    ui.colored_label(
+        Color32::GREEN,
+        format!("{}", format_register(register_idx)),
+    );
+    ui.label(", ".to_string());
+    format_data_processing_operand(ui, operand)
 }
 
-fn format_data_processing_operand(operand: &DataProcessingOperand) -> String {
+fn format_data_processing_operand(ui: &mut egui::Ui, operand: &DataProcessingOperand) -> Response {
     match operand {
-        DataProcessingOperand::Immediate(value) => format!("${:#X}", *value),
+        DataProcessingOperand::Immediate(value) => ui.label(format!("${:#X}", *value)),
         DataProcessingOperand::ShiftedImmediate { operand, shift } => {
-            format!("${:#X}", ror(*operand, *shift))
+            ui.label(format!("${:#X}", ror(*operand, *shift)))
         }
-        DataProcessingOperand::RegisterShiftedRegister {
-            operand_register,
-            shift_register,
-            shift_type,
-        } => "RegisterShiftedRegister".to_string(),
-        DataProcessingOperand::ImmediateShiftedRegister {
-            operand_register,
-            shift,
-            shift_type,
-        } => "ImmediateShiftedRegister".to_string(),
+        _ => ui.label("TODO"),
+        // DataProcessingOperand::RegisterShiftedRegister {
+        //     operand_register,
+        //     shift_register,
+        //     shift_type,
+        // } => "RegisterShiftedRegister".to_string(),
+        // DataProcessingOperand::ImmediateShiftedRegister {
+        //     operand_register,
+        //     shift,
+        //     shift_type,
+        // } => "ImmediateShiftedRegister".to_string(),
     }
 }

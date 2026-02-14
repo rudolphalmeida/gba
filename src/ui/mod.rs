@@ -1,6 +1,6 @@
-use crate::ui::disasm::opcode_disassembly;
-use eframe::egui::{Color32, Context, RichText, Ui};
-use eframe::{CreationContext, Frame, egui};
+use crate::ui::disasm::{condition_text, opcode_disassembly};
+use eframe::egui::{Color32, Context, Ui};
+use eframe::{egui, CreationContext, Frame};
 use gba::cpu::{ExecutedOpcode, OpcodeTraceLog};
 use gba::gba::Gba;
 use std::path::PathBuf;
@@ -125,7 +125,7 @@ impl TraceOpcodeViewer {
                 let opcodes = &gba.cpu.opcode_traces;
 
                 egui::Grid::new("opcodes_trace")
-                    .num_columns(2)
+                    .num_columns(3)
                     .spacing([10.0, 4.0])
                     .striped(true)
                     .show(ui, |ui| {
@@ -151,21 +151,35 @@ impl TraceOpcodeViewer {
 
     fn note_decoded_opcode_row(ui: &mut Ui, execute_address: u32, execute_opcode: u32) {
         ui.add(|ui: &mut Ui| {
-            ui.label(
-                RichText::new(format!("{:#08X}", execute_address))
-                    .color(Color32::from_rgb(255, 110, 110)),
+            ui.colored_label(
+                Color32::DARK_RED,
+                format!("{:#08X}", execute_address),
             )
         });
-        ui.add_sized(ui.available_size(), |ui: &mut Ui| ui.label(format!("Failed to decode opcode {:#08X}", execute_opcode)));
+        ui.add(|ui: &mut Ui| {
+            ui.label("")
+        });
+        ui.add_sized(ui.available_size(), |ui: &mut Ui| {
+            ui.label(format!("Failed to decode opcode {:#08X}", execute_opcode))
+        });
     }
 
     fn decoded_opcode_row(ui: &mut Ui, opcode: &ExecutedOpcode) {
         ui.add(|ui: &mut Ui| {
-            ui.label(
-                RichText::new(format!("{:#08X}", opcode.address))
-                    .color(Color32::from_rgb(110, 255, 110)),
+            ui.colored_label(
+                Color32::LIGHT_GRAY,
+                format!("{:#08X}", opcode.address),
             )
         });
-        ui.add_sized(ui.available_size(), |ui: &mut Ui| opcode_disassembly(ui, &opcode.opcode));
+        ui.add(|ui: &mut Ui| {
+            ui.colored_label(if opcode.did_execute {
+                Color32::WHITE
+            } else {
+                Color32::GRAY
+            }, condition_text(opcode.condition))
+        });
+        ui.add_sized(ui.available_size(), |ui: &mut Ui| {
+            opcode_disassembly(ui, &opcode.opcode)
+        });
     }
 }
