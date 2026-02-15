@@ -7,6 +7,14 @@ use std::path::PathBuf;
 
 mod disasm;
 
+const COLOR_ERROR: Color32 = Color32::LIGHT_RED;
+const COLOR_DECODED_INSTR_ADDR: Color32 = Color32::LIGHT_GREEN;
+const COLOR_NOT_DECODED_INSTR_ADDR: Color32 = COLOR_ERROR;
+const COLOR_CONDITION_SUCCESS: Color32 = Color32::LIGHT_GRAY;
+const COLOR_CONDITION_FAIL: Color32 = Color32::DARK_GRAY;
+const COLOR_MNEMONIC: Color32 = Color32::WHITE;
+const COLOR_REGISTER: Color32 = Color32::LIGHT_BLUE;
+
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct GbaApp {
     trace_opcode_viewer: TraceOpcodeViewer,
@@ -135,7 +143,7 @@ impl TraceOpcodeViewer {
                                     Self::decoded_opcode_row(ui, &opcode);
                                 }
                                 OpcodeTraceLog::NotDecoded(execute_address, execute_opcode) => {
-                                    Self::note_decoded_opcode_row(
+                                    Self::not_decoded_opcode_row(
                                         ui,
                                         *execute_address,
                                         *execute_opcode,
@@ -149,10 +157,10 @@ impl TraceOpcodeViewer {
             });
     }
 
-    fn note_decoded_opcode_row(ui: &mut Ui, execute_address: u32, execute_opcode: u32) {
+    fn not_decoded_opcode_row(ui: &mut Ui, execute_address: u32, execute_opcode: u32) {
         ui.add(|ui: &mut Ui| {
             ui.colored_label(
-                Color32::DARK_RED,
+                COLOR_NOT_DECODED_INSTR_ADDR,
                 format!("{:#08X}", execute_address),
             )
         });
@@ -167,15 +175,15 @@ impl TraceOpcodeViewer {
     fn decoded_opcode_row(ui: &mut Ui, opcode: &ExecutedOpcode) {
         ui.add(|ui: &mut Ui| {
             ui.colored_label(
-                Color32::LIGHT_GRAY,
+                COLOR_DECODED_INSTR_ADDR,
                 format!("{:#08X}", opcode.address),
             )
         });
         ui.add(|ui: &mut Ui| {
             ui.colored_label(if opcode.did_execute {
-                Color32::WHITE
+                COLOR_CONDITION_SUCCESS
             } else {
-                Color32::GRAY
+                COLOR_CONDITION_FAIL
             }, condition_text(opcode.condition))
         });
         ui.add_sized(ui.available_size(), |ui: &mut Ui| {

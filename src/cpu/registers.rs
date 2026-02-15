@@ -1,3 +1,4 @@
+pub const LINK_IDX: usize = 14;
 pub const PC_IDX: usize = 15;
 
 #[derive(Debug, Copy, Clone)]

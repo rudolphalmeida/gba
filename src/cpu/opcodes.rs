@@ -1,4 +1,4 @@
-use crate::cpu::registers::{CpuState, RegisterFile, PC_IDX};
+use crate::cpu::registers::{CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 use std::cmp::PartialEq;
@@ -185,11 +185,11 @@ fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
 
     let mask = 1 << 24;
     if opcode & mask == mask {
-        Some(DecodedArmOpcode::B {
+        Some(DecodedArmOpcode::BL {
             offset: opcode & 0xFFFFFF,
         })
     } else {
-        Some(DecodedArmOpcode::BL {
+        Some(DecodedArmOpcode::B {
             offset: opcode & 0xFFFFFF,
         })
     }
@@ -210,7 +210,7 @@ pub fn execute_b<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType, mut o
 pub fn execute_bl<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType, offset: u32) {
     let link = cpu.registers[PC_IDX].wrapping_sub(4);
     execute_b(cpu, bus, offset);
-    cpu.registers[14] = link;
+    cpu.registers[LINK_IDX] = link;
 }
 
 // BX

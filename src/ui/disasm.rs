@@ -1,6 +1,7 @@
+use crate::ui::{COLOR_MNEMONIC, COLOR_REGISTER};
 use eframe::egui;
-use eframe::egui::{Color32, Response};
-use gba::cpu::opcodes::{DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode, ror, Condition};
+use eframe::egui::Response;
+use gba::cpu::opcodes::{ror, Condition, DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode};
 
 pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) -> Response {
     ui.horizontal(|ui| match opcode {
@@ -81,16 +82,16 @@ fn format_opcode_b_bl(ui: &mut egui::Ui, mut offset: u32, is_bl: bool) -> Respon
     // Add 8 because PC is assumed to be leading in the actual opcode
     offset = offset.wrapping_mul(4).wrapping_add(8);
     ui.colored_label(
-        Color32::BLUE,
+        COLOR_MNEMONIC,
         if is_bl { "BL" } else { "B" },
     );
     ui.label(egui::RichText::new(format!("${:X}", offset as i32)).underline())
 }
 
 fn format_opcode_bx(ui: &mut egui::Ui, register_idx: usize) -> Response {
-    ui.colored_label(Color32::BLUE, "BX");
+    ui.colored_label(COLOR_MNEMONIC, "BX");
     ui.colored_label(
-        Color32::GREEN,
+        COLOR_REGISTER,
         format!("{}", format_register(register_idx)),
     )
 }
@@ -113,7 +114,7 @@ fn format_data_processing(
     _set_flags: bool,
 ) -> Response {
     ui.colored_label(
-        Color32::BLUE,
+        COLOR_MNEMONIC,
         format!("{:?}", sub_opcode),
     );
 
@@ -127,7 +128,7 @@ fn format_data_processing(
         rn
     };
     ui.colored_label(
-        Color32::GREEN,
+        COLOR_REGISTER,
         format!("{}", format_register(register_idx)),
     );
     ui.label(", ".to_string());
