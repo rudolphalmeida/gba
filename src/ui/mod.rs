@@ -1,6 +1,6 @@
 use crate::ui::disasm::{condition_text, opcode_disassembly};
 use eframe::egui::{Color32, Context, Ui};
-use eframe::{egui, CreationContext, Frame};
+use eframe::{CreationContext, Frame, egui};
 use gba::cpu::{ExecutedOpcode, OpcodeTraceLog};
 use gba::gba::Gba;
 use std::path::PathBuf;
@@ -164,9 +164,7 @@ impl TraceOpcodeViewer {
                 format!("{:#08X}", execute_address),
             )
         });
-        ui.add(|ui: &mut Ui| {
-            ui.label("")
-        });
+        ui.add(|ui: &mut Ui| ui.label(""));
         ui.add_sized(ui.available_size(), |ui: &mut Ui| {
             ui.label(format!("Failed to decode opcode {:#08X}", execute_opcode))
         });
@@ -174,20 +172,19 @@ impl TraceOpcodeViewer {
 
     fn decoded_opcode_row(ui: &mut Ui, opcode: &ExecutedOpcode) {
         ui.add(|ui: &mut Ui| {
-            ui.colored_label(
-                COLOR_DECODED_INSTR_ADDR,
-                format!("{:#08X}", opcode.address),
-            )
+            ui.colored_label(COLOR_DECODED_INSTR_ADDR, format!("{:#08X}", opcode.address))
         });
         ui.add(|ui: &mut Ui| {
-            ui.colored_label(if opcode.did_execute {
-                COLOR_CONDITION_SUCCESS
-            } else {
-                COLOR_CONDITION_FAIL
-            }, condition_text(opcode.condition))
+            ui.colored_label(
+                if opcode.did_execute {
+                    COLOR_CONDITION_SUCCESS
+                } else {
+                    COLOR_CONDITION_FAIL
+                },
+                condition_text(opcode.condition),
+            )
         });
-        ui.add_sized(ui.available_size(), |ui: &mut Ui| {
-            opcode_disassembly(ui, &opcode.opcode)
-        });
+        let (rect, _response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::empty());
+        ui.put(rect, |ui: &mut Ui| opcode_disassembly(ui, &opcode.opcode));
     }
 }
