@@ -1,9 +1,8 @@
+use super::registers::CondFlag;
 use crate::cpu::registers::{CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
 use std::cmp::PartialEq;
-
-use super::registers::CondFlag;
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     // TODO: This is possibly a slow decoding scheme. Try a LUT?
@@ -664,74 +663,64 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     increment: bool,
     psr_n_force_user: bool,
     write_address_into_base: bool,
-    mut rlist: u16,
+    rlist: u16,
 ) {
     cpu.registers.get_and_incr_pc(4);
 
     let mut words_to_transfer = rlist.count_ones();
+    // Empty Rlist does R15 on ARMv4
+    let rlist = if words_to_transfer == 0 {
+        words_to_transfer = 16;  // When updating *only* PC it is as if all 16 registers are transferred
+        1 << 15
+    } else { rlist };
 
-    if words_to_transfer == 0 {
-        rlist = 1 << 15; // Empty Rlist does R15 on ARMv4
-        words_to_transfer = 1;
-        // TODO: Modify Rb=Rb+/-40
-    }
-
+    let first = rlist.trailing_zeros() as usize;
     let rb_in_rlist = rlist & (1 << base_register) != 0;
-    let rb_first_in_rlist = if rb_in_rlist {
-        (rlist.trailing_zeros() + 1) == base_register as u32
-    } else {
-        false
-    };
+    let rb_first_in_rlist = rb_in_rlist && (base_register == first);
 
-    let mut base_address = if increment {
-        cpu.registers[base_register]
-    } else {
-        cpu.registers[base_register] - ((words_to_transfer - 1) << 2)
-    };
+    let old_base_address = cpu.registers[base_register];
+     let (mut address, new_base_address) = if increment {
+         (old_base_address, old_base_address + (words_to_transfer << 2))
+     } else {
+         (old_base_address - ((words_to_transfer - 1) << 2), old_base_address)
+     };
+
+
     if pre_increment {
-        base_address = if increment {
-            base_address + 4
+        address = if increment {
+            address + 4
         } else {
-            base_address - 4
+            address - 4
         };
     }
 
     // The first write is non-sequential
     cpu.next_access = ACCESS_NONSEQ;
 
-    for i in 0..16 {
+    for i in first..16 {
         if rlist & (1 << i) == 0 {
             continue;
         }
 
         match transfer_type {
             BlockTransferType::STM => {
-                // Ref: https://rust-console.github.io/gbatek-gbaonly/#strange-effects-on-invalid-rlists
-                // Writeback with Rb included in Rlist: Store OLD base if Rb is FIRST entry in
-                // Rlist, otherwise store NEW base (STM/ARMv4)
-                let data = if i == base_register && !rb_first_in_rlist {
-                    cpu.registers[i] + (words_to_transfer * 4)
-                } else { cpu.registers[i] };
-                bus.write_word(base_address, data, cpu.next_access)
+                bus.write_word(address, cpu.registers[i], cpu.next_access);
+                if write_address_into_base && i == first {
+                    cpu.registers[base_register] = new_base_address;
+                }
             },
             BlockTransferType::LDM => {
-                let value = bus.read_word(base_address, cpu.next_access);
+                let value = bus.read_word(address, cpu.next_access);
                 cpu.registers[i] = value;
             }
         }
 
-        base_address += 4;
+        address += 4;
         // Every write after the first is sequential
         cpu.next_access = ACCESS_SEQ;
 
         if i == PC_IDX && transfer_type == BlockTransferType::LDM {
             cpu.reload_pipeline(bus);
         }
-    }
-
-    // Ref: https://rust-console.github.io/gbatek-gbaonly/#strange-effects-on-invalid-rlists
-    // If writeback is enabled, however opcode is LDM and Rb is in Rlist -> No writeback
-    if write_address_into_base && !(transfer_type == BlockTransferType::LDM && rb_in_rlist) {
-        cpu.registers[base_register] = base_address;
     }
 }
