@@ -697,30 +697,26 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     // The first write is non-sequential
     cpu.next_access = ACCESS_NONSEQ;
 
-    for i in first..16 {
-        if rlist & (1 << i) == 0 {
-            continue;
-        }
+    {
+        let register_bank: &mut dyn std::ops::IndexMut<usize, Output=u32> = if !psr_n_force_user { &mut cpu.registers } else { &mut cpu.registers.user_bank };
 
-        match transfer_type {
-            BlockTransferType::STM => {
-                bus.write_word(address, cpu.registers[i], cpu.next_access);
+        for i in (first..16).filter(|i| rlist & (1 << i) != 0) {
+            if BlockTransferType::STM == transfer_type {
+                bus.write_word(address, register_bank[i], cpu.next_access);
                 if write_address_into_base && i == first {
-                    cpu.registers[base_register] = new_base_address;
+                    register_bank[base_register] = new_base_address;
                 }
-            },
-            BlockTransferType::LDM => {
-                let value = bus.read_word(address, cpu.next_access);
-                cpu.registers[i] = value;
+            } else {
+                register_bank[i] = bus.read_word(address, cpu.next_access);
             }
-        }
 
-        address += 4;
-        // Every write after the first is sequential
-        cpu.next_access = ACCESS_SEQ;
-
-        if i == PC_IDX && transfer_type == BlockTransferType::LDM {
-            cpu.reload_pipeline(bus);
+            address += 4;
+            // Every write after the first is sequential
+            cpu.next_access = ACCESS_SEQ;
         }
+    }
+
+    if transfer_type == BlockTransferType::LDM && (rlist & (1 << 15) != 0) {
+        cpu.reload_pipeline(bus);
     }
 }
