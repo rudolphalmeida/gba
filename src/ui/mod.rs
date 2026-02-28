@@ -49,7 +49,6 @@ impl GbaApp {
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.trace_opcode_viewer.render_ui(ui, ctx, gba);
             });
-        } else {
         }
     }
 
@@ -65,21 +64,21 @@ impl GbaApp {
     fn show_main_menu(&mut self, ui: &mut egui::Ui, _ctx: &Context, _frame: &mut Frame) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("Open").clicked() {
-                    if let Some(rom) = rfd::FileDialog::new().pick_file() {
-                        self.rom_path = Some(rom.into());
-                        self.begin_rom_if_possible();
-                    }
+                if ui.button("Open").clicked()
+                    && let Some(rom_path) = rfd::FileDialog::new().pick_file()
+                {
+                    self.rom_path = Some(rom_path);
+                    self.begin_rom_if_possible();
                 }
                 ui.separator();
-                if ui.button("Select BIOS").clicked() {
-                    if let Some(bios) = rfd::FileDialog::new().pick_file() {
-                        self.bios_path = Some(bios.into());
-                        self.begin_rom_if_possible();
-                    }
+                if ui.button("Select BIOS").clicked()
+                    && let Some(bios_path) = rfd::FileDialog::new().pick_file()
+                {
+                    self.bios_path = Some(bios_path);
+                    self.begin_rom_if_possible();
                 }
                 if let Some(bios) = self.bios_path.as_ref() {
-                    ui.label(format!("{}", bios.to_str().unwrap()));
+                    ui.label(bios.to_str().unwrap().to_string());
                 }
                 ui.separator();
                 if ui.button("Quit").clicked() {
@@ -140,7 +139,7 @@ impl TraceOpcodeViewer {
                         for opcode in opcodes {
                             match opcode {
                                 OpcodeTraceLog::Decoded(opcode) => {
-                                    Self::decoded_opcode_row(ui, &opcode);
+                                    Self::decoded_opcode_row(ui, opcode);
                                 }
                                 OpcodeTraceLog::NotDecoded(execute_address, execute_opcode) => {
                                     Self::not_decoded_opcode_row(

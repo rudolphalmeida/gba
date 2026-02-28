@@ -160,9 +160,9 @@ impl RegisterFile {
 
     pub fn update_flag(&mut self, flag: CondFlag, value: bool) {
         if value {
-            self.cpsr = self.cpsr | (flag as u32);
+            self.cpsr |= flag as u32;
         } else {
-            self.cpsr = self.cpsr & !(flag as u32);
+            self.cpsr &= !(flag as u32);
         }
     }
 }

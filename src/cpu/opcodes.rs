@@ -1,7 +1,7 @@
 use super::registers::CondFlag;
-use crate::cpu::registers::{CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ};
+use crate::cpu::registers::{CpuState, LINK_IDX, PC_IDX, RegisterFile};
+use crate::system_bus::{ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
 use std::cmp::PartialEq;
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
@@ -277,10 +277,7 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
         let shift = (opcode & 0xF00) >> 7;
 
         if shift != 0 {
-            DataProcessingOperand::ShiftedImmediate {
-                operand: nn,
-                shift: shift,
-            }
+            DataProcessingOperand::ShiftedImmediate { operand: nn, shift }
         } else {
             DataProcessingOperand::Immediate(nn)
         }
@@ -293,7 +290,8 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
         }
 
         let operand_register = opcode as usize & 0xF;
-        let shift_type = unsafe { std::mem::transmute(((opcode & 0x60) >> 5) as u8) };
+        let shift_type =
+            unsafe { std::mem::transmute::<u8, ShiftType>(((opcode & 0x60) >> 5) as u8) };
 
         if shift_by_register {
             let shift_register = ((opcode & 0xF00) >> 8) as usize;
@@ -670,35 +668,42 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     let mut words_to_transfer = rlist.count_ones();
     // Empty Rlist does R15 on ARMv4
     let rlist = if words_to_transfer == 0 {
-        words_to_transfer = 16;  // When updating *only* PC it is as if all 16 registers are transferred
+        words_to_transfer = 16; // When updating *only* PC it is as if all 16 registers are transferred
         1 << 15
-    } else { rlist };
+    } else {
+        rlist
+    };
 
     let first = rlist.trailing_zeros() as usize;
     let rb_in_rlist = rlist & (1 << base_register) != 0;
     let rb_first_in_rlist = rb_in_rlist && (base_register == first);
 
     let old_base_address = cpu.registers[base_register];
-     let (mut address, new_base_address) = if increment {
-         (old_base_address, old_base_address + (words_to_transfer << 2))
-     } else {
-         (old_base_address - ((words_to_transfer - 1) << 2), old_base_address)
-     };
-
+    let (mut address, new_base_address) = if increment {
+        (
+            old_base_address,
+            old_base_address + (words_to_transfer << 2),
+        )
+    } else {
+        (
+            old_base_address - ((words_to_transfer - 1) << 2),
+            old_base_address,
+        )
+    };
 
     if pre_increment {
-        address = if increment {
-            address + 4
-        } else {
-            address - 4
-        };
+        address = if increment { address + 4 } else { address - 4 };
     }
 
     // The first write is non-sequential
     cpu.next_access = ACCESS_NONSEQ;
 
     {
-        let register_bank: &mut dyn std::ops::IndexMut<usize, Output=u32> = if !psr_n_force_user { &mut cpu.registers } else { &mut cpu.registers.user_bank };
+        let register_bank: &mut dyn std::ops::IndexMut<usize, Output = u32> = if !psr_n_force_user {
+            &mut cpu.registers
+        } else {
+            &mut cpu.registers.user_bank
+        };
 
         for i in (first..16).filter(|i| rlist & (1 << i) != 0) {
             if BlockTransferType::STM == transfer_type {

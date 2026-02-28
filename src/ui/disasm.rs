@@ -94,7 +94,7 @@ fn format_opcode_b_bl(ui: &mut egui::Ui, mut offset: u32, is_bl: bool) {
 
 fn format_opcode_bx(ui: &mut egui::Ui, register_idx: usize) {
     ui.colored_label(COLOR_MNEMONIC, "BX");
-    ui.colored_label(COLOR_REGISTER, format!("{}", format_register(register_idx)));
+    ui.colored_label(COLOR_REGISTER, format_register(register_idx).to_string());
 }
 
 fn format_register(idx: usize) -> String {
@@ -125,7 +125,7 @@ fn format_data_processing(
     } else {
         rn
     };
-    ui.colored_label(COLOR_REGISTER, format!("{}", format_register(register_idx)));
+    ui.colored_label(COLOR_REGISTER, format_register(register_idx).to_string());
     ui.label(", ".to_string());
     format_data_processing_operand(ui, operand);
 }
