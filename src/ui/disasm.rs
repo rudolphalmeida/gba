@@ -17,25 +17,24 @@ pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) -> Response {
     .response
 }
 
-// TODO: Get better labels from other emulators
 pub fn condition_text(condition: Condition) -> egui::RichText {
     egui::RichText::new(match condition {
         Condition::Equal => "EQ",
-        Condition::NotEqual => "NEQ",
+        Condition::NotEqual => "NE",
         Condition::CarrySet => "CS",
         Condition::CarryCleared => "CC",
-        Condition::Minus => "N",
-        Condition::Positive => "P",
-        Condition::Overflow => "O",
-        Condition::NoOverflow => "NO",
-        Condition::UnsignedHigher => "UH",
-        Condition::UnsignedLowerOrSame => "ULE",
+        Condition::Minus => "MI",
+        Condition::Positive => "PL",
+        Condition::Overflow => "VS",
+        Condition::NoOverflow => "VC",
+        Condition::UnsignedHigher => "HI",
+        Condition::UnsignedLowerOrSame => "LS",
         Condition::GreaterOrEqual => "GE",
-        Condition::LessThan => "L",
-        Condition::GreaterThan => "G",
-        Condition::LessOrEqual => "LEQ",
-        Condition::Always => "ALWAYS",
-        Condition::Never => "NEVER",
+        Condition::LessThan => "LT",
+        Condition::GreaterThan => "GT",
+        Condition::LessOrEqual => "LE",
+        Condition::Always => "AL",
+        Condition::Never => "NV",
     })
 }
 
@@ -55,30 +54,6 @@ fn format_decoded_arm_opcode(ui: &mut egui::Ui, opcode: &DecodedArmOpcode) {
             ui.label("Opcode not implemented");
         }
     };
-
-    // match opcode {
-    //     DecodedArmOpcode::B { offset } => format!("B ${:#X}", *offset),
-    //     DecodedArmOpcode::BL { offset } => format!("BL ${:#X}", *offset),
-    //     DecodedArmOpcode::BX { register_idx } => {
-    //         format!("BX {}", format_register(*register_idx as usize))
-    //     }
-    //     DecodedArmOpcode::DataProcessing {
-    //         operand,
-    //         rd,
-    //         rn,
-    //         sub_opcode,
-    //         set_flags,
-    //     } => format_data_processing(operand, *rd, *rn, sub_opcode),
-    //     DecodedArmOpcode::BlockDataTransfer {
-    //         base_register,
-    //         transfer_type,
-    //         pre_increment,
-    //         increment,
-    //         psr_n_force_user,
-    //         write_address_into_base,
-    //         rlist,
-    //     } => "LDM/STM".to_string(),
-    // }
 }
 
 fn format_opcode_b_bl(ui: &mut egui::Ui, mut offset: u32, is_bl: bool) {
@@ -136,7 +111,11 @@ fn format_data_processing_operand(ui: &mut egui::Ui, operand: &DataProcessingOpe
             ui.label(format!("${:#X}", *value));
         }
         DataProcessingOperand::ShiftedImmediate { operand, shift } => {
-            ui.label(format!("${:#X}", ror(*operand, *shift)));
+            ui.label(format!("${:#X}", ror(*operand, *shift)))
+                .on_hover_ui(|ui| {
+                    ui.label(format!("Operand = {}", operand));
+                    ui.label(format!("Shift = {}", shift));
+                });
         }
         _ => {
             ui.label("TODO");
