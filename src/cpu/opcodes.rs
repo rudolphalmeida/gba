@@ -663,8 +663,6 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     write_address_into_base: bool,
     rlist: u16,
 ) {
-    cpu.registers.get_and_incr_pc(4);
-
     let mut words_to_transfer = rlist.count_ones();
     // Empty Rlist does R15 on ARMv4
     let rlist = if words_to_transfer == 0 {
@@ -679,24 +677,24 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     let rb_first_in_rlist = rb_in_rlist && (base_register == first);
 
     let old_base_address = cpu.registers[base_register];
-    let (mut address, new_base_address) = if increment {
-        (
-            old_base_address,
-            old_base_address + (words_to_transfer << 2),
-        )
-    } else {
-        (
-            old_base_address - ((words_to_transfer - 1) << 2),
-            old_base_address,
-        )
-    };
+
+     let (mut address, new_base_address) = if increment {
+         (old_base_address, old_base_address + (words_to_transfer << 2))
+     } else {
+         let new_base_address = old_base_address - (words_to_transfer << 2);
+         (new_base_address + 4, new_base_address)
+     };
 
     if pre_increment {
         address = if increment { address + 4 } else { address - 4 };
     }
 
+cpu.registers.get_and_incr_pc(4);
+
     // The first write is non-sequential
     cpu.next_access = ACCESS_NONSEQ;
+
+    let mut reload_pipeline = false;
 
     {
         let register_bank: &mut dyn std::ops::IndexMut<usize, Output = u32> = if !psr_n_force_user {
@@ -710,9 +708,15 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
                 bus.write_word(address, register_bank[i], cpu.next_access);
                 if write_address_into_base && i == first {
                     register_bank[base_register] = new_base_address;
+                    if base_register == PC_IDX {
+                        reload_pipeline = true;
+                    }
                 }
             } else {
                 register_bank[i] = bus.read_word(address, cpu.next_access);
+                if i == PC_IDX {
+                    reload_pipeline = true;
+                }
             }
 
             address += 4;
@@ -721,7 +725,13 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
         }
     }
 
-    if transfer_type == BlockTransferType::LDM && (rlist & (1 << 15) != 0) {
+    if (transfer_type == BlockTransferType::LDM && (rlist & (1 << PC_IDX) != 0)) && psr_n_force_user {
+        cpu.registers.cpsr = cpu.registers.spsr_moded();
+    }
+
+    if reload_pipeline {
         cpu.reload_pipeline(bus);
+    } else {
+        cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
     }
 }

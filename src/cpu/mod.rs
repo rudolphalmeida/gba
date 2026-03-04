@@ -304,7 +304,7 @@ mod tests {
                 assert_eq!(transaction.data, data);
                 assert_eq!(transaction.access as u8, access);
             } else {
-                panic!("No matching write transaction for address {address:#010X} found");
+                panic!("No matching write transaction for address {address} found");
             }
         }
 
@@ -673,7 +673,7 @@ mod tests {
 
         if opcode_failures.len() > 1 {
             for (opcode, failure) in opcode_failures.iter() {
-                eprintln!("Opcode {opcode} ({opcode:#010X}) failed with {failure:?}");
+                eprintln!("Opcode {opcode} failed with {failure:?}");
             }
         }
 
