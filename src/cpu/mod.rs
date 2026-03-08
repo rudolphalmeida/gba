@@ -1,6 +1,10 @@
-use crate::cpu::opcodes::{check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer, execute_data_processing, Condition, DecodedArmOpcode, Opcode};
+use crate::cpu::opcodes::{
+    Condition, DecodedArmOpcode, Opcode, check_condition, condition_from_opcode, decode_arm_opcode,
+    execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer,
+    execute_data_processing,
+};
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
+use crate::system_bus::{ACCESS_CODE, ACCESS_SEQ, SystemBus};
 use circular_buffer::CircularBuffer;
 use registers::RegisterFile;
 
@@ -60,20 +64,29 @@ impl Arm7Cpu {
 
     fn reload_pipeline16<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let addr = self.registers[PC_IDX];
-        self.pipeline[0] =
-            (addr, bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32);
+        self.pipeline[0] = (
+            addr,
+            bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32,
+        );
         let addr = self.registers[PC_IDX];
-        self.pipeline[1] =
-            (addr, bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32);
+        self.pipeline[1] = (
+            addr,
+            bus.read_half_word(self.registers.get_and_incr_pc(2), ACCESS_CODE | ACCESS_SEQ) as u32,
+        );
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
     }
 
     fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let addr = self.registers[PC_IDX];
-        self.pipeline[0] = (addr, bus.read_word(self.registers.get_and_incr_pc(4), self.next_access));
+        self.pipeline[0] = (
+            addr,
+            bus.read_word(self.registers.get_and_incr_pc(4), self.next_access),
+        );
         let addr = self.registers[PC_IDX];
-        self.pipeline[1] =
-            (addr, bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ));
+        self.pipeline[1] = (
+            addr,
+            bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ),
+        );
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
 
         // TODO: IRQ disable
@@ -95,7 +108,10 @@ impl Arm7Cpu {
         // The corresponding PC increment is implemented in the opcodes. Since this fetch and the
         // execution happen in parallel and the execution functions need to see the proper PC value
         // it seems not possible to have a general increment here
-        self.pipeline[1] = (self.registers[PC_IDX], bus.read_word(self.registers[PC_IDX], self.next_access));
+        self.pipeline[1] = (
+            self.registers[PC_IDX],
+            bus.read_word(self.registers[PC_IDX], self.next_access),
+        );
 
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
             let mut execution_log = ExecutedOpcode {
@@ -113,9 +129,11 @@ impl Arm7Cpu {
                 execution_log.did_execute = false;
             }
 
-            self.opcode_traces.push_back(OpcodeTraceLog::Decoded(execution_log));
+            self.opcode_traces
+                .push_back(OpcodeTraceLog::Decoded(execution_log));
         } else {
-            self.opcode_traces.push_back(OpcodeTraceLog::NotDecoded(execute_address, execute_opcode));
+            self.opcode_traces
+                .push_back(OpcodeTraceLog::NotDecoded(execute_address, execute_opcode));
         }
     }
 
@@ -177,9 +195,9 @@ pub enum OpcodeTraceLog {
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
-    use crate::system_bus::{SystemBus, ACCESS_CODE};
+    use crate::cpu::registers::{CpuMode, CpuState, PC_IDX, RegisterFile};
+    use crate::system_bus::{ACCESS_CODE, SystemBus};
     use circular_buffer::CircularBuffer;
     use serde::{Deserialize, Serialize};
     use serde_json;
@@ -282,7 +300,8 @@ mod tests {
         fn read_word(&mut self, address: u32, access: u8) -> u32 {
             if access & ACCESS_CODE != ACCESS_CODE {
                 return if let Some(transaction) = self.find_transaction_for_addr(address) {
-                    assert!(transaction.kind == 0 || transaction.kind == 1);  //Code read or data read
+                    assert!(transaction.kind == 0 || transaction.kind == 1); //Code read or data read
+                    assert_eq!(transaction.access as u8, access);
                     transaction.data
                 } else {
                     self.next_index += 1;

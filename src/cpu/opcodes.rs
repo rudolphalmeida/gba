@@ -720,6 +720,12 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
                 if i == PC_IDX {
                     reload_pipeline = true;
                 }
+                if write_address_into_base && i == first {
+                    register_bank[base_register] = new_base_address;
+                    if base_register == PC_IDX {
+                        reload_pipeline = true;
+                    }
+                }
             }
 
             address += 4;
@@ -733,9 +739,8 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
         cpu.registers.cpsr = cpu.registers.spsr_moded();
     }
 
+    cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
     if reload_pipeline {
         cpu.reload_pipeline(bus);
-    } else {
-        cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
     }
 }
