@@ -700,30 +700,42 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     let mut reload_pipeline = false;
 
     {
-        let register_bank: &mut dyn std::ops::IndexMut<usize, Output = u32> = if !psr_n_force_user {
-            &mut cpu.registers
-        } else {
-            &mut cpu.registers.user_bank
-        };
-
         for i in (first..16).filter(|i| rlist & (1 << i) != 0) {
             if BlockTransferType::STM == transfer_type {
-                bus.write_word(address, register_bank[i], cpu.next_access);
+                bus.write_word(
+                    address,
+                    cpu.registers.read_register(i, psr_n_force_user),
+                    cpu.next_access,
+                );
                 if write_address_into_base && i == first {
-                    register_bank[base_register] = new_base_address;
+                    cpu.registers
+                        .write_register(base_register, new_base_address, psr_n_force_user);
                     if base_register == PC_IDX {
                         reload_pipeline = true;
                     }
                 }
             } else {
-                register_bank[i] = bus.read_word(address, cpu.next_access);
+                cpu.registers.write_register(
+                    i,
+                    bus.read_word(address, cpu.next_access),
+                    psr_n_force_user,
+                );
                 if i == PC_IDX {
                     reload_pipeline = true;
                 }
-                if write_address_into_base && i == first {
-                    register_bank[base_register] = new_base_address;
-                    if base_register == PC_IDX {
-                        reload_pipeline = true;
+                if i == first {
+                    if write_address_into_base {
+                        cpu.registers.write_register(
+                            base_register,
+                            new_base_address,
+                            psr_n_force_user,
+                        );
+                        if base_register == PC_IDX {
+                            reload_pipeline = true;
+                        }
+                    }
+                    if (rlist & (1 << PC_IDX) != 0) && psr_n_force_user {
+                        cpu.registers.cpsr = cpu.registers.spsr_moded();
                     }
                 }
             }
@@ -732,11 +744,6 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
             // Every write after the first is sequential
             cpu.next_access = ACCESS_SEQ;
         }
-    }
-
-    if (transfer_type == BlockTransferType::LDM && (rlist & (1 << PC_IDX) != 0)) && psr_n_force_user
-    {
-        cpu.registers.cpsr = cpu.registers.spsr_moded();
     }
 
     cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
