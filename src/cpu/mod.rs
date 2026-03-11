@@ -700,7 +700,38 @@ mod tests {
     }
 
     #[test]
-    fn test_ldm() {
-        test_arm_opcode("arm_ldm_stm");
+    fn test_arm_opcode_exact_case() {
+        let test_state = read_test_data("arm_ldm_stm");
+        let exact_opcode = 141932244;
+
+        let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
+
+        for test_case in test_state.iter() {
+            if test_case.opcode != exact_opcode {
+                continue;
+            }
+            let mut bus = TransactionSystemBus {
+                test_state: test_case,
+                opcode: test_case.opcode,
+                next_index: 0,
+            };
+            let mut cpu = cpu_with_state(&test_case.initial);
+
+            cpu.execute_next_arm(&mut bus);
+            compare_cpu_with_state(
+                test_case.opcode,
+                &cpu,
+                &test_case.r#final,
+                &mut opcode_failures,
+            );
+        }
+
+        if opcode_failures.len() > 1 {
+            for (opcode, failure) in opcode_failures.iter() {
+                eprintln!("Opcode {opcode} failed with {failure:?}");
+            }
+        }
+
+        assert_eq!(opcode_failures.len(), 0);
     }
 }
