@@ -1,6 +1,6 @@
 use super::registers::CondFlag;
 use crate::cpu::Arm7Cpu;
-use crate::cpu::registers::{CpuState, LINK_IDX, PC_IDX, RegisterFile};
+use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
 use crate::system_bus::{ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
 use std::cmp::PartialEq;
 
@@ -674,6 +674,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 
     let first = rlist.trailing_zeros() as usize;
     let rb_in_rlist = rlist & (1 << base_register) != 0;
+    let pc_in_rlist = rlist & (1 << PC_IDX) != 0;
     let rb_first_in_rlist = rb_in_rlist && (base_register == first);
 
     let old_base_address = cpu.registers[base_register];
@@ -694,6 +695,11 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 
     cpu.registers.get_and_incr_pc(4);
 
+    if pc_in_rlist && psr_n_force_user {
+        cpu.registers.cpsr = cpu.registers.spsr_moded();
+        cpu.switch_cpu_mode(CpuMode::Fiq);
+    }
+
     // The first write is non-sequential
     cpu.next_access = ACCESS_NONSEQ;
 
@@ -702,40 +708,24 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     {
         for i in (first..16).filter(|i| rlist & (1 << i) != 0) {
             if BlockTransferType::STM == transfer_type {
-                bus.write_word(
-                    address,
-                    cpu.registers.read_register(i, psr_n_force_user),
-                    cpu.next_access,
-                );
+                bus.write_word(address, cpu.registers[i], cpu.next_access);
                 if write_address_into_base && i == first {
-                    cpu.registers
-                        .write_register(base_register, new_base_address, psr_n_force_user);
+                    cpu.registers[base_register] = new_base_address;
                     if base_register == PC_IDX {
                         reload_pipeline = true;
                     }
                 }
             } else {
-                cpu.registers.write_register(
-                    i,
-                    bus.read_word(address, cpu.next_access),
-                    psr_n_force_user,
-                );
+                cpu.registers[i] = bus.read_word(address, cpu.next_access);
                 if i == PC_IDX {
                     reload_pipeline = true;
                 }
                 if i == first {
                     if write_address_into_base {
-                        cpu.registers.write_register(
-                            base_register,
-                            new_base_address,
-                            psr_n_force_user,
-                        );
+                        cpu.registers[base_register] = new_base_address;
                         if base_register == PC_IDX {
                             reload_pipeline = true;
                         }
-                    }
-                    if (rlist & (1 << PC_IDX) != 0) && psr_n_force_user {
-                        cpu.registers.cpsr = cpu.registers.spsr_moded();
                     }
                 }
             }

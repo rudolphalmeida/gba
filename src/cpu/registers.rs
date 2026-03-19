@@ -165,26 +165,6 @@ impl RegisterFile {
             self.cpsr &= !(flag as u32);
         }
     }
-
-    pub fn read_register(&self, idx: usize, ignore_mode: bool) -> u32 {
-        //! Reads a register at the specified index. `ignore_mode` if set to true
-        //! will ignore the `mode()` and read directly from the user bank
-        if ignore_mode {
-            self.user_bank[idx]
-        } else {
-            self[idx]
-        }
-    }
-
-    pub fn write_register(&mut self, idx: usize, value: u32, ignore_mode: bool) {
-        //! Writes a register at the specified index. `ignore_mode` if set to `true`
-        //! will ignore the `mode()` and write directly to the user bank
-        if ignore_mode {
-            self.user_bank[idx] = value;
-        } else {
-            self[idx] = value;
-        }
-    }
 }
 
 impl std::ops::Index<usize> for RegisterFile {
