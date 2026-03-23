@@ -202,7 +202,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fs::File;
-    use std::io::{BufReader, Write, stdout};
+    use std::io::{BufReader, Write, stderr, stdout};
     use test_case::test_case;
 
     #[test]
@@ -690,10 +690,12 @@ mod tests {
             );
         }
 
-        let mut lock = stdout().lock();
-        if opcode_failures.len() > 1 {
-            for (opcode, failure) in opcode_failures.iter() {
-                writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
+        {
+            let mut lock = stderr().lock();
+            if opcode_failures.len() > 1 {
+                for (opcode, failure) in opcode_failures.iter() {
+                    writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
+                }
             }
         }
 
@@ -727,10 +729,12 @@ mod tests {
             );
         }
 
-        let mut lock = stdout().lock();
-        if opcode_failures.len() > 1 {
-            for (opcode, failure) in opcode_failures.iter() {
-                writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
+        {
+            let mut lock = stderr().lock();
+            if opcode_failures.len() > 1 {
+                for (opcode, failure) in opcode_failures.iter() {
+                    writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
+                }
             }
         }
 

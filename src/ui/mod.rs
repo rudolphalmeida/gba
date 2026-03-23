@@ -1,6 +1,7 @@
 use crate::ui::disasm::{condition_text, opcode_disassembly};
 use eframe::egui::{Color32, Context, Ui};
 use eframe::{CreationContext, Frame, egui};
+use egui_extras::{Column, TableBuilder, TableRow};
 use gba::cpu::{ExecutedOpcode, OpcodeTraceLog};
 use gba::gba::Gba;
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ const COLOR_REGISTER: Color32 = Color32::LIGHT_BLUE;
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct GbaApp {
     trace_opcode_viewer: TraceOpcodeViewer,
+    disassemby_view: DisassemblyView,
     #[serde(skip)]
     gba: Option<Gba>,
 
@@ -34,6 +36,7 @@ impl GbaApp {
 
         Self {
             trace_opcode_viewer: TraceOpcodeViewer::new(),
+            disassemby_view: DisassemblyView::new(),
             gba: None,
             rom_path: None,
             bios_path: None,
@@ -48,6 +51,7 @@ impl GbaApp {
         if let Some(gba) = self.gba.as_mut() {
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.trace_opcode_viewer.render_ui(ui, ctx, gba);
+                self.disassemby_view.render_ui(ui, ctx, gba);
             });
         }
     }
@@ -90,6 +94,9 @@ impl GbaApp {
                 if ui.button("Trace").clicked() {
                     self.trace_opcode_viewer.toggle_is_open();
                 }
+                if ui.button("Disassembly").clicked() {
+                    self.disassemby_view.toggle_is_open();
+                }
             })
         });
     }
@@ -131,49 +138,52 @@ impl TraceOpcodeViewer {
 
                 let opcodes = &gba.cpu.opcode_traces;
 
-                egui::Grid::new("opcodes_trace")
-                    .num_columns(3)
-                    .spacing([10.0, 4.0])
+                TableBuilder::new(ui)
+                    .auto_shrink(false)
+                    .resizable(true)
                     .striped(true)
-                    .show(ui, |ui| {
+                    .column(Column::auto().at_least(60.0).resizable(false))
+                    .column(Column::auto().at_least(20.0).resizable(false))
+                    .column(Column::remainder().at_least(100.0))
+                    .body(|mut body| {
                         for opcode in opcodes {
-                            match opcode {
+                            body.row(30.0, |mut row| match opcode {
                                 OpcodeTraceLog::Decoded(opcode) => {
-                                    Self::decoded_opcode_row(ui, opcode);
+                                    Self::decoded_opcode_row(&mut row, opcode);
                                 }
                                 OpcodeTraceLog::NotDecoded(execute_address, execute_opcode) => {
                                     Self::not_decoded_opcode_row(
-                                        ui,
+                                        &mut row,
                                         *execute_address,
                                         *execute_opcode,
                                     );
                                 }
-                            }
-                            ui.end_row();
+                            });
                         }
-                    })
-                    .response
+                    });
             });
     }
 
-    fn not_decoded_opcode_row(ui: &mut Ui, execute_address: u32, execute_opcode: u32) {
-        ui.add(|ui: &mut Ui| {
+    fn not_decoded_opcode_row(ui: &mut TableRow, execute_address: u32, execute_opcode: u32) {
+        ui.col(|ui: &mut Ui| {
             ui.colored_label(
                 COLOR_NOT_DECODED_INSTR_ADDR,
                 format!("{:#08X}", execute_address),
-            )
+            );
         });
-        ui.add(|ui: &mut Ui| ui.label(""));
-        ui.add_sized(ui.available_size(), |ui: &mut Ui| {
-            ui.label(format!("Failed to decode opcode {:#08X}", execute_opcode))
+        ui.col(|ui: &mut Ui| {
+            ui.label("");
+        });
+        ui.col(|ui: &mut Ui| {
+            ui.label(format!("Failed to decode opcode {:#08X}", execute_opcode));
         });
     }
 
-    fn decoded_opcode_row(ui: &mut Ui, opcode: &ExecutedOpcode) {
-        ui.add(|ui: &mut Ui| {
-            ui.colored_label(COLOR_DECODED_INSTR_ADDR, format!("{:#08X}", opcode.address))
+    fn decoded_opcode_row(ui: &mut TableRow, opcode: &ExecutedOpcode) {
+        ui.col(|ui: &mut Ui| {
+            ui.colored_label(COLOR_DECODED_INSTR_ADDR, format!("{:#08X}", opcode.address));
         });
-        ui.add(|ui: &mut Ui| {
+        ui.col(|ui: &mut Ui| {
             ui.colored_label(
                 if opcode.did_execute {
                     COLOR_CONDITION_SUCCESS
@@ -181,9 +191,30 @@ impl TraceOpcodeViewer {
                     COLOR_CONDITION_FAIL
                 },
                 condition_text(opcode.condition),
-            )
+            );
         });
-        let (rect, _response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::empty());
-        ui.put(rect, |ui: &mut Ui| opcode_disassembly(ui, &opcode.opcode));
+        ui.col(|ui: &mut Ui| opcode_disassembly(ui, &opcode.opcode));
+    }
+}
+
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+struct DisassemblyView {
+    is_open: bool,
+}
+
+impl DisassemblyView {
+    pub fn new() -> Self {
+        Self { is_open: false }
+    }
+
+    pub fn toggle_is_open(&mut self) {
+        self.is_open = !self.is_open;
+    }
+
+    pub fn render_ui(&mut self, _ui: &mut Ui, ctx: &Context, _gba: &mut Gba) {
+        egui::Window::new("Disassembly")
+            .vscroll(true)
+            .open(&mut self.is_open)
+            .show(ctx, |_ui| {});
     }
 }

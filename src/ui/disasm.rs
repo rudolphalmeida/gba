@@ -1,11 +1,10 @@
 use crate::ui::{COLOR_MNEMONIC, COLOR_REGISTER};
 use eframe::egui;
-use eframe::egui::Response;
 use gba::cpu::opcodes::{
     Condition, DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode, ror,
 };
 
-pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) -> Response {
+pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) {
     ui.horizontal(|ui| {
         match opcode {
             Opcode::Arm(decoded_arm_opcode) => format_decoded_arm_opcode(ui, decoded_arm_opcode),
@@ -13,8 +12,7 @@ pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) -> Response {
                 ui.label("Thumb disassembly not implemented".to_string());
             }
         };
-    })
-    .response
+    });
 }
 
 pub fn condition_text(condition: Condition) -> egui::RichText {
