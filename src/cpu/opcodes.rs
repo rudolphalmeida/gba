@@ -695,9 +695,14 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 
     cpu.registers.get_and_incr_pc(4);
 
-    if pc_in_rlist && psr_n_force_user {
-        cpu.registers.cpsr = cpu.registers.spsr_moded();
-        cpu.switch_cpu_mode(CpuMode::Fiq);
+    let old_mode = cpu.registers.mode();
+    let switch_mode = psr_n_force_user
+        && ((transfer_type == BlockTransferType::STM) || !pc_in_rlist)
+        && old_mode != CpuMode::User
+        && old_mode != CpuMode::System;
+
+    if switch_mode {
+        cpu.switch_cpu_mode(CpuMode::User);
     }
 
     // The first write is non-sequential
@@ -716,7 +721,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
                     }
                 }
             } else {
-                cpu.registers[i] = bus.read_word(address, cpu.next_access);
+                let value = bus.read_word(address, cpu.next_access);
                 if i == PC_IDX {
                     reload_pipeline = true;
                 }
@@ -728,12 +733,30 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
                         }
                     }
                 }
+                // Need to do it here because if write back and Rb is first in Rlist `value` needs
+                // to override `new_base_address` i.e. no writeback
+                cpu.registers[i] = value;
             }
 
             address += 4;
             // Every write after the first is sequential
             cpu.next_access = ACCESS_SEQ;
         }
+    }
+
+    if transfer_type == BlockTransferType::LDM {
+        if switch_mode {
+            // TODO: User mode conflict goes here
+        }
+
+        if pc_in_rlist && psr_n_force_user {
+            cpu.registers.cpsr = cpu.registers.spsr_moded();
+        }
+    }
+
+    // TODO: This needs to be scheduled for one instruction after the current LDM/STM
+    if switch_mode {
+        cpu.switch_cpu_mode(old_mode);
     }
 
     cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
