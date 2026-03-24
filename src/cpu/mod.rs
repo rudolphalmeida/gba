@@ -1,7 +1,7 @@
 use crate::cpu::opcodes::{
     Condition, DecodedArmOpcode, Opcode, check_condition, condition_from_opcode, decode_arm_opcode,
     execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer,
-    execute_data_processing,
+    execute_data_processing, execute_swp,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{ACCESS_CODE, ACCESS_SEQ, SystemBus};
@@ -174,6 +174,12 @@ impl Arm7Cpu {
                 write_address_into_base,
                 rlist,
             ),
+            DecodedArmOpcode::Swap {
+                base_register,
+                src_register,
+                dest_register,
+                word,
+            } => execute_swp(self, bus, base_register, src_register, dest_register, word),
         }
     }
 }
@@ -202,7 +208,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fs::File;
-    use std::io::{BufReader, Write, stderr, stdout};
+    use std::io::{BufReader, Write, stderr};
     use test_case::test_case;
 
     #[test]
@@ -668,6 +674,7 @@ mod tests {
     #[test_case("arm_data_proc_immediate_shift")]
     #[test_case("arm_data_proc_register_shift")]
     #[test_case("arm_ldm_stm")]
+    #[test_case("arm_swp")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 

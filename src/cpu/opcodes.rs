@@ -1,7 +1,7 @@
 use super::registers::CondFlag;
 use crate::cpu::Arm7Cpu;
 use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
-use crate::system_bus::{ACCESS_CODE, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
+use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
 use std::cmp::PartialEq;
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
@@ -12,6 +12,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_bx,
         try_decode_data_processing,
         try_decode_ldm_stm,
+        try_decode_swp,
     ];
 
     for decoder in decoders {
@@ -167,6 +168,14 @@ pub enum DecodedArmOpcode {
         psr_n_force_user: bool, // Load PSR or force user mode
         write_address_into_base: bool,
         rlist: u16,
+    },
+
+    // SWP
+    Swap {
+        base_register: usize,
+        src_register: usize,
+        dest_register: usize,
+        word: bool, // 32 bits. False implies swap 8 bits
     },
 }
 
@@ -763,4 +772,44 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     if reload_pipeline {
         cpu.reload_pipeline(bus);
     }
+}
+
+fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
+    if opcode & 0x0FB00FF0 != 0x01000090 {
+        return None;
+    }
+
+    let word = opcode & (1 << 22) == 0;
+    let src_register = opcode as usize & 0xF;
+    let dest_register = (opcode as usize >> 12) & 0xF;
+    let base_register = (opcode as usize >> 16) & 0xF;
+
+    // PC cannot be used for any of the registers. Base = PC_IDX should decode as MRS
+    if src_register == PC_IDX || dest_register == PC_IDX || base_register == PC_IDX {
+        return None;
+    }
+
+    Some(DecodedArmOpcode::Swap {
+        base_register,
+        src_register,
+        dest_register,
+        word,
+    })
+}
+
+pub fn execute_swp<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    base_register: usize,
+    src_register: usize,
+    dest_register: usize,
+    word: bool,
+) {
+    cpu.registers.get_and_incr_pc(4);
+
+    let base_address = cpu.registers[base_register];
+    let src_value = cpu.registers[src_register];
+
+    cpu.registers[dest_register] = bus.read_word(base_address, ACCESS_NONSEQ);
+    bus.write_word(base_address, src_value, ACCESS_LOCK);
 }
