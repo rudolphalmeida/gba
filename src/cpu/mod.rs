@@ -24,7 +24,7 @@ pub struct Arm7Cpu {
     next_access: u8,
 
     // TODO: Move this to the UI and give it a higher limit
-    pub opcode_traces: CircularBuffer<10, OpcodeTraceLog>,
+    pub opcode_traces: CircularBuffer<25, OpcodeTraceLog>,
 }
 
 impl Arm7Cpu {

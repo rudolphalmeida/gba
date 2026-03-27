@@ -43,15 +43,20 @@ impl GbaApp {
         }
     }
 
-    pub fn render_ui(&mut self, ctx: &Context, frame: &mut Frame) {
-        egui::TopBottomPanel::top("main-menu").show(ctx, |ui| {
-            self.show_main_menu(ui, ctx, frame);
+    pub fn render_ui(&mut self, ui: &mut Ui, frame: &mut Frame) {
+        egui::Panel::top("main-menu").show_inside(ui, |ui| {
+            self.show_main_menu(ui, frame);
         });
 
         if let Some(gba) = self.gba.as_mut() {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                self.trace_opcode_viewer.render_ui(ui, ctx, gba);
-                self.disassemby_view.render_ui(ui, ctx, gba);
+            egui::Panel::left("trace").show_inside(ui, |ui| {
+                self.trace_opcode_viewer.render_ui(ui, gba);
+            });
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                ui.label("TODO");
+            });
+            egui::Panel::right("disassemby").show_inside(ui, |ui| {
+                self.disassemby_view.render_ui(ui, gba);
             });
         }
     }
@@ -65,7 +70,7 @@ impl GbaApp {
         }
     }
 
-    fn show_main_menu(&mut self, ui: &mut egui::Ui, _ctx: &Context, _frame: &mut Frame) {
+    fn show_main_menu(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Open").clicked()
@@ -91,76 +96,63 @@ impl GbaApp {
             });
 
             ui.menu_button("Debug", |ui| {
-                if ui.button("Trace").clicked() {
-                    self.trace_opcode_viewer.toggle_is_open();
-                }
-                if ui.button("Disassembly").clicked() {
-                    self.disassemby_view.toggle_is_open();
-                }
+                if ui.button("Trace").clicked() {}
+                if ui.button("Disassembly").clicked() {}
             })
         });
     }
 }
 
 impl eframe::App for GbaApp {
-    fn update(&mut self, ctx: &Context, frame: &mut Frame) {
-        self.render_ui(ctx, frame);
-    }
+    fn update(&mut self, _ctx: &Context, _frame: &mut Frame) {}
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut Frame) {
+        self.render_ui(ui, frame);
+    }
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
-struct TraceOpcodeViewer {
-    is_open: bool,
-}
+struct TraceOpcodeViewer {}
 
 impl TraceOpcodeViewer {
     pub fn new() -> Self {
-        Self { is_open: true }
+        Self {}
     }
 
-    pub fn toggle_is_open(&mut self) {
-        self.is_open = !self.is_open;
-    }
+    pub fn render_ui(&mut self, ui: &mut Ui, gba: &mut Gba) {
+        if ui.button("Step").clicked() {
+            gba.step();
+        }
+        ui.separator();
 
-    pub fn render_ui(&mut self, _ui: &mut Ui, ctx: &Context, gba: &mut Gba) {
-        egui::Window::new("Opcode trace")
-            .vscroll(true)
-            .open(&mut self.is_open)
-            .show(ctx, |ui| {
-                if ui.button("Step").clicked() {
-                    gba.step();
-                }
-                ui.separator();
+        let opcodes = &gba.cpu.opcode_traces;
 
-                let opcodes = &gba.cpu.opcode_traces;
-
-                TableBuilder::new(ui)
-                    .auto_shrink(false)
-                    .resizable(true)
-                    .striped(true)
-                    .column(Column::auto().at_least(60.0).resizable(false))
-                    .column(Column::auto().at_least(20.0).resizable(false))
-                    .column(Column::remainder().at_least(100.0))
-                    .body(|mut body| {
-                        for opcode in opcodes {
-                            body.row(30.0, |mut row| match opcode {
-                                OpcodeTraceLog::Decoded(opcode) => {
-                                    Self::decoded_opcode_row(&mut row, opcode);
-                                }
-                                OpcodeTraceLog::NotDecoded(execute_address, execute_opcode) => {
-                                    Self::not_decoded_opcode_row(
-                                        &mut row,
-                                        *execute_address,
-                                        *execute_opcode,
-                                    );
-                                }
-                            });
+        TableBuilder::new(ui)
+            .auto_shrink(false)
+            .resizable(true)
+            .striped(true)
+            .column(Column::auto().at_least(60.0).resizable(false))
+            .column(Column::auto().at_least(20.0).resizable(false))
+            .column(Column::remainder().at_least(100.0))
+            .body(|mut body| {
+                for opcode in opcodes {
+                    body.row(20.0, |mut row| match opcode {
+                        OpcodeTraceLog::Decoded(opcode) => {
+                            Self::decoded_opcode_row(&mut row, opcode);
+                        }
+                        OpcodeTraceLog::NotDecoded(execute_address, execute_opcode) => {
+                            Self::not_decoded_opcode_row(
+                                &mut row,
+                                *execute_address,
+                                *execute_opcode,
+                            );
                         }
                     });
+                }
             });
     }
 
@@ -198,23 +190,12 @@ impl TraceOpcodeViewer {
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
-struct DisassemblyView {
-    is_open: bool,
-}
+struct DisassemblyView {}
 
 impl DisassemblyView {
     pub fn new() -> Self {
-        Self { is_open: false }
+        Self {}
     }
 
-    pub fn toggle_is_open(&mut self) {
-        self.is_open = !self.is_open;
-    }
-
-    pub fn render_ui(&mut self, _ui: &mut Ui, ctx: &Context, _gba: &mut Gba) {
-        egui::Window::new("Disassembly")
-            .vscroll(true)
-            .open(&mut self.is_open)
-            .show(ctx, |_ui| {});
-    }
+    pub fn render_ui(&mut self, _ui: &mut Ui, _gba: &mut Gba) {}
 }

@@ -13,9 +13,9 @@ thiserror = "2.0.12"
 serde = { version = "1.0.219", features = ["derive"] }
 test-case = "3.3.1"
 rfd = "0.17.2"
-eframe = { version = "0.33.3", features = ["persistence"] }
+eframe = { version = "0.34.0", features = ["persistence"] }
 circular-buffer = "1.1.0"
-egui_extras = "0.33.3"
+egui_extras = "0.34.0"
 
 [profile.dev]
 debug = true
