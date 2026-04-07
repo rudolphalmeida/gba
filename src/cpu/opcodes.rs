@@ -13,6 +13,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_data_processing,
         try_decode_ldm_stm,
         try_decode_swp,
+        try_decode_swi,
     ];
 
     for decoder in decoders {
@@ -132,8 +133,8 @@ pub enum DataProcessingOperand {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlockTransferType {
-    STM = 0,
-    LDM = 1,
+    STM,
+    LDM,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -177,6 +178,7 @@ pub enum DecodedArmOpcode {
         dest_register: usize,
         word: bool, // 32 bits. False implies swap 8 bits
     },
+    Swi {},
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -784,11 +786,6 @@ fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
     let dest_register = (opcode as usize >> 12) & 0xF;
     let base_register = (opcode as usize >> 16) & 0xF;
 
-    // PC cannot be used for any of the registers. Base = PC_IDX should decode as MRS
-    if src_register == PC_IDX || dest_register == PC_IDX || base_register == PC_IDX {
-        return None;
-    }
-
     Some(DecodedArmOpcode::Swap {
         base_register,
         src_register,
@@ -810,6 +807,28 @@ pub fn execute_swp<BusType: SystemBus>(
     let base_address = cpu.registers[base_register];
     let src_value = cpu.registers[src_register];
 
-    cpu.registers[dest_register] = bus.read_word(base_address, ACCESS_NONSEQ);
-    bus.write_word(base_address, src_value, ACCESS_LOCK);
+    if word {
+        cpu.registers[dest_register] = bus.read_word(base_address, ACCESS_NONSEQ);
+        if base_address != (base_address & !3) {
+            cpu.registers[dest_register] =
+                ror(cpu.registers[dest_register], (base_address & 3) * 8);
+        }
+        bus.write_word(base_address, src_value, ACCESS_NONSEQ | ACCESS_LOCK);
+    } else {
+        cpu.registers[dest_register] = bus.read_byte(base_address, ACCESS_NONSEQ) as u32;
+        bus.write_byte(base_address, src_value as u8, ACCESS_NONSEQ | ACCESS_LOCK);
+    }
+
+    bus.idle();
+    cpu.next_access = ACCESS_CODE;
+
+    if dest_register == PC_IDX {
+        cpu.reload_pipeline(bus);
+    }
 }
+
+fn try_decode_swi(opcode: u32) -> Option<DecodedArmOpcode> {
+    None
+}
+
+pub fn execute_swi<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType) {}

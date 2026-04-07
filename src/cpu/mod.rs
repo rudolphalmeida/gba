@@ -1,7 +1,7 @@
 use crate::cpu::opcodes::{
     Condition, DecodedArmOpcode, Opcode, check_condition, condition_from_opcode, decode_arm_opcode,
     execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer,
-    execute_data_processing, execute_swp,
+    execute_data_processing, execute_swi, execute_swp,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{ACCESS_CODE, ACCESS_SEQ, SystemBus};
@@ -132,6 +132,7 @@ impl Arm7Cpu {
             self.opcode_traces
                 .push_back(OpcodeTraceLog::Decoded(execution_log));
         } else {
+            self.registers.get_and_incr_pc(4);
             self.opcode_traces
                 .push_back(OpcodeTraceLog::NotDecoded(execute_address, execute_opcode));
         }
@@ -180,6 +181,7 @@ impl Arm7Cpu {
                 dest_register,
                 word,
             } => execute_swp(self, bus, base_register, src_register, dest_register, word),
+            DecodedArmOpcode::Swi {} => execute_swi(self, bus),
         }
     }
 }
@@ -207,6 +209,7 @@ mod tests {
     use circular_buffer::CircularBuffer;
     use serde::{Deserialize, Serialize};
     use serde_json;
+    use std::fmt;
     use std::fs::File;
     use std::io::{BufReader, Write, stderr};
     use test_case::test_case;
@@ -298,12 +301,8 @@ mod tests {
                 }
             }
         }
-    }
 
-    impl<'a> SystemBus for TransactionSystemBus<'a> {
-        fn idle(&mut self) {}
-
-        fn read_word(&mut self, address: u32, access: u8) -> u32 {
+        fn read(&mut self, address: u32, access: u8, mask_func: &dyn Fn(u32) -> u32) -> u32 {
             if access & ACCESS_CODE != ACCESS_CODE {
                 return if let Some(transaction) = self.find_transaction_for_addr(address) {
                     assert!(transaction.kind == 0 || transaction.kind == 1); //Code read or data read
@@ -311,7 +310,7 @@ mod tests {
                     transaction.data
                 } else {
                     self.next_index += 1;
-                    address & !3
+                    mask_func(address)
                 };
             }
             if address == self.test_state.base_addr {
@@ -319,38 +318,51 @@ mod tests {
                 self.test_state.opcode
             } else {
                 self.next_index += 1;
-                address & !3
+                mask_func(address)
             }
         }
 
-        fn write_word(&mut self, address: u32, data: u32, access: u8) {
+        fn write<SizeType: Into<u32> + fmt::Debug>(
+            &mut self,
+            address: u32,
+            data: SizeType,
+            access: u8,
+        ) {
             if let Some(transaction) = self.find_transaction_for_addr(address) {
                 assert_eq!(transaction.kind, 2); // 2 is write for ARM7TDMI tests
-                assert_eq!(transaction.data, data);
+                assert_eq!(transaction.data, data.into());
                 assert_eq!(transaction.access as u8, access);
             } else {
                 panic!("No matching write transaction for address {address} found");
             }
         }
+    }
 
-        fn read_half_word(&mut self, mut address: u32, access: u8) -> u16 {
-            address &= !1;
-            if access & ACCESS_CODE != ACCESS_CODE {
-                return if let Some(transaction) = self.find_transaction_for_addr(address) {
-                    transaction.data as u16
-                } else {
-                    address as u16
-                };
-            }
-            if address == self.test_state.base_addr {
-                self.test_state.opcode as u16
-            } else {
-                address as u16
-            }
+    impl<'a> SystemBus for TransactionSystemBus<'a> {
+        fn idle(&mut self) {}
+
+        fn read_word(&mut self, address: u32, access: u8) -> u32 {
+            self.read(address, access, &|value| value & !3)
+        }
+
+        fn write_word(&mut self, address: u32, data: u32, access: u8) {
+            self.write(address, data, access);
+        }
+
+        fn read_half_word(&mut self, address: u32, access: u8) -> u16 {
+            self.read(address, access, &|value| value & !1) as u16
         }
 
         fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
-            todo!()
+            self.write(address, data, access);
+        }
+
+        fn read_byte(&mut self, address: u32, access: u8) -> u8 {
+            self.read(address, access, &|value| value) as u8
+        }
+
+        fn write_byte(&mut self, address: u32, data: u8, access: u8) {
+            self.write(address, data, access);
         }
     }
 
@@ -675,6 +687,7 @@ mod tests {
     #[test_case("arm_data_proc_register_shift")]
     #[test_case("arm_ldm_stm")]
     #[test_case("arm_swp")]
+    #[test_case("arm_swi")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -711,8 +724,8 @@ mod tests {
 
     #[test]
     fn test_arm_opcode_exact_case() {
-        let test_state = read_test_data("arm_ldm_stm");
-        let exact_opcode = 141932244;
+        let test_state = read_test_data("arm_swp");
+        let exact_opcode = 17809552;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 

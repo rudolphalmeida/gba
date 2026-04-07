@@ -15,6 +15,9 @@ pub trait SystemBus {
 
     fn read_half_word(&mut self, address: u32, access: u8) -> u16;
     fn write_half_word(&mut self, address: u32, data: u16, access: u8);
+
+    fn read_byte(&mut self, address: u32, access: u8) -> u8;
+    fn write_byte(&mut self, address: u32, data: u8, access: u8);
 }
 
 pub struct Bus {
@@ -69,6 +72,14 @@ impl SystemBus for Bus {
     }
 
     fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
+        todo!()
+    }
+
+    fn read_byte(&mut self, address: u32, access: u8) -> u8 {
+        todo!()
+    }
+
+    fn write_byte(&mut self, address: u32, data: u8, access: u8) {
         todo!()
     }
 }
