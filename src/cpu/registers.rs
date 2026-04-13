@@ -130,6 +130,8 @@ impl RegisterFile {
         CpuMode::try_from(self.cpsr & (CondFlag::ModeMask as u32)).unwrap()
     }
 
+    /// Returns the SPSR based off the current `mode()`. Returns CPSR when in
+    /// `User` or `System` mode.
     pub fn spsr_moded(&self) -> u32 {
         match self.mode() {
             CpuMode::User => self.cpsr, // TODO: What goes here?

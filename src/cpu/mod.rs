@@ -181,7 +181,7 @@ impl Arm7Cpu {
                 dest_register,
                 word,
             } => execute_swp(self, bus, base_register, src_register, dest_register, word),
-            DecodedArmOpcode::Swi {} => execute_swi(self, bus),
+            DecodedArmOpcode::Swi { .. } => execute_swi(self, bus),
         }
     }
 }

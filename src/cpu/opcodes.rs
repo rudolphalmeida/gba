@@ -148,8 +148,6 @@ pub enum DecodedArmOpcode {
     BX {
         register_idx: u8,
     },
-
-    // Data processing group
     DataProcessing {
         operand: DataProcessingOperand,
         /// Destination register index. Can be `PC_IDX` in which case the behavior of the opcode changes
@@ -170,15 +168,15 @@ pub enum DecodedArmOpcode {
         write_address_into_base: bool,
         rlist: u16,
     },
-
-    // SWP
     Swap {
         base_register: usize,
         src_register: usize,
         dest_register: usize,
         word: bool, // 32 bits. False implies swap 8 bits
     },
-    Swi {},
+    Swi {
+        comment: u32, // Only low 24 bits are valid
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -828,7 +826,21 @@ pub fn execute_swp<BusType: SystemBus>(
 }
 
 fn try_decode_swi(opcode: u32) -> Option<DecodedArmOpcode> {
-    None
+    let mask = 0xF << 24;
+    if opcode & mask != mask {
+        return None;
+    }
+
+    let comment = opcode & 0x00FFFFFF;
+
+    Some(DecodedArmOpcode::Swi { comment })
 }
 
-pub fn execute_swi<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType) {}
+pub fn execute_swi<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType) {
+    cpu.registers.r14_svc = cpu.registers.user_bank[PC_IDX] - 4;
+    cpu.registers.spsr_svc = cpu.registers.cpsr;
+    cpu.switch_cpu_mode(CpuMode::Supervisor);
+    cpu.registers.cpsr |= CondFlag::IrqDisable as u32;
+    cpu.registers.user_bank[PC_IDX] = 0x00000008;
+    cpu.reload_pipeline(bus);
+}
