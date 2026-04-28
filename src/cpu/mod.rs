@@ -1,7 +1,7 @@
 use crate::cpu::opcodes::{
     Condition, DecodedArmOpcode, Opcode, check_condition, condition_from_opcode, decode_arm_opcode,
     execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer,
-    execute_data_processing, execute_swi, execute_swp,
+    execute_data_processing, execute_data_transfer, execute_swi, execute_swp,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{ACCESS_CODE, ACCESS_SEQ, SystemBus};
@@ -175,6 +175,9 @@ impl Arm7Cpu {
                 write_address_into_base,
                 rlist,
             ),
+            DecodedArmOpcode::DataTransfer { transfer_type, .. } => {
+                execute_data_transfer(self, bus, transfer_type)
+            }
             DecodedArmOpcode::Swap {
                 base_register,
                 src_register,
@@ -688,6 +691,7 @@ mod tests {
     #[test_case("arm_ldm_stm")]
     #[test_case("arm_swp")]
     #[test_case("arm_swi")]
+    #[test_case("arm_ldr_str_immediate_offset")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 

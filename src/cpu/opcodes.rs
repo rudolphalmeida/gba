@@ -14,6 +14,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_ldm_stm,
         try_decode_swp,
         try_decode_swi,
+        try_decode_data_transfer,
     ];
 
     for decoder in decoders {
@@ -132,9 +133,26 @@ pub enum DataProcessingOperand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BlockTransferType {
-    STM,
-    LDM,
+pub enum RegisterTransferType {
+    Store,
+    Load,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OffsetArgument {
+    ImmdiateOffset(u8),
+    RegisterOffset(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DataTransferSize {
+    /// Only signed byte supported via LDRSB i.e. sign extend
+    Byte,
+    /// true: Signed half word via LDRSH i.e. sign extend
+    /// false: Store half word via STRH, Load unsigned halfword via LDRH i.e. zero extend
+    HalfWord(bool),
+    /// Only unsigned load/store supported
+    DoubleWord,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -161,13 +179,25 @@ pub enum DecodedArmOpcode {
     // LDM & STM
     BlockDataTransfer {
         base_register: usize,
-        transfer_type: BlockTransferType,
+        transfer_type: RegisterTransferType,
         pre_increment: bool,    // Add offset before transfer. False implies post
         increment: bool,        // Offset adds. False implies down i.e. subtract
         psr_n_force_user: bool, // Load PSR or force user mode
         write_address_into_base: bool,
         rlist: u16,
     },
+
+    DataTransfer {
+        transfer_type: RegisterTransferType,
+        transfer_size: DataTransferSize,
+        pre_increment: bool, // or pre_decrement
+        increment: bool,
+        offset: OffsetArgument,
+        write_back: bool,
+        base_register: u8,
+        target_register: u8,
+    },
+
     Swap {
         base_register: usize,
         src_register: usize,
@@ -643,9 +673,9 @@ fn try_decode_ldm_stm(opcode: u32) -> Option<DecodedArmOpcode> {
     let psr_n_force_user = opcode & 0x400000 == 0x400000;
     let write_address_into_base = opcode & 0x200000 == 0x200000;
     let transfer_type = if opcode & 0x100000 == 0x100000 {
-        BlockTransferType::LDM
+        RegisterTransferType::Load
     } else {
-        BlockTransferType::STM
+        RegisterTransferType::Store
     };
     let base_register = (opcode as usize & 0xF0000) >> 16;
     let rlist = opcode as u16;
@@ -665,7 +695,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
     base_register: usize,
-    transfer_type: BlockTransferType,
+    transfer_type: RegisterTransferType,
     pre_increment: bool,
     increment: bool,
     psr_n_force_user: bool,
@@ -706,7 +736,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 
     let old_mode = cpu.registers.mode();
     let switch_mode = psr_n_force_user
-        && ((transfer_type == BlockTransferType::STM) || !pc_in_rlist)
+        && ((transfer_type == RegisterTransferType::Store) || !pc_in_rlist)
         && old_mode != CpuMode::User
         && old_mode != CpuMode::System;
 
@@ -721,7 +751,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 
     {
         for i in (first..16).filter(|i| rlist & (1 << i) != 0) {
-            if BlockTransferType::STM == transfer_type {
+            if RegisterTransferType::Store == transfer_type {
                 bus.write_word(address, cpu.registers[i], cpu.next_access);
                 if write_address_into_base && i == first {
                     cpu.registers[base_register] = new_base_address;
@@ -753,7 +783,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
         }
     }
 
-    if transfer_type == BlockTransferType::LDM {
+    if transfer_type == RegisterTransferType::Load {
         if switch_mode {
             // TODO: User mode conflict goes here
         }
@@ -772,6 +802,83 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     if reload_pipeline {
         cpu.reload_pipeline(bus);
     }
+}
+
+fn try_decode_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
+    if opcode & 0x0E200090 != 0x00000090 {
+        return None;
+    }
+
+    let pre_increment = opcode & (1 << 24) == (1 << 24); // or decrement
+    let increment = opcode & (1 << 23) == (1 << 23);
+    let immediate_offset = opcode & (1 << 22) == (1 << 22);
+
+    let write_back = if pre_increment {
+        opcode & (1 << 21) == (1 << 21)
+    } else {
+        // If post indexing then writeback bit must always be `0` however
+        // writeback is always enabled
+        if opcode & (1 << 21) == (1 << 21) {
+            return None;
+        }
+        true
+    };
+    let mut transfer_type = if opcode & (1 << 20) == (1 << 20) {
+        RegisterTransferType::Load
+    } else {
+        RegisterTransferType::Store
+    };
+
+    let base_register = ((opcode & 0xF0000) >> 16) as u8;
+    let target_register = ((opcode & 0xF000) >> 12) as u8;
+
+    let offset = if immediate_offset {
+        let offset_high = ((opcode & 0xF00) >> 4) as u8;
+        let offset_low = opcode as u8 & 0xF;
+        OffsetArgument::ImmdiateOffset(offset_high | offset_low)
+    } else {
+        // If register offset bits 11-8 are unused and must be 0000
+        if opcode & 0xF00 != 0x000 {
+            return None;
+        }
+        let register = opcode as u8 & 0xF;
+        OffsetArgument::RegisterOffset(register)
+    };
+
+    let transfer_size = match (opcode & 0x60) >> 5 {
+        0b00 if transfer_type == RegisterTransferType::Store => return None, // Reserved for SWP
+        0b01 if transfer_type == RegisterTransferType::Store => DataTransferSize::HalfWord(false),
+        0b10 if transfer_type == RegisterTransferType::Store => {
+            transfer_type = RegisterTransferType::Load; // Actually a LDRD
+            DataTransferSize::DoubleWord
+        }
+        0b11 if transfer_type == RegisterTransferType::Store => DataTransferSize::DoubleWord,
+
+        0b00 if transfer_type == RegisterTransferType::Load => return None, // Reserved
+        0b01 if transfer_type == RegisterTransferType::Load => DataTransferSize::HalfWord(false),
+        0b10 if transfer_type == RegisterTransferType::Load => DataTransferSize::Byte,
+        0b11 if transfer_type == RegisterTransferType::Load => DataTransferSize::HalfWord(true),
+
+        _ => panic!("Impossible match arm"),
+    };
+
+    Some(DecodedArmOpcode::DataTransfer {
+        transfer_type,
+        transfer_size,
+        pre_increment,
+        increment,
+        write_back,
+        base_register,
+        target_register,
+        offset,
+    })
+}
+
+pub fn execute_data_transfer<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    transfer_type: RegisterTransferType,
+) {
 }
 
 fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
