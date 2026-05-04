@@ -2,6 +2,7 @@ use super::registers::CondFlag;
 use crate::cpu::Arm7Cpu;
 use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
 use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
+use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
@@ -121,12 +122,12 @@ pub enum DataProcessingOperand {
         shift: u32, // Always ROR
     },
     RegisterShiftedRegister {
-        operand_register: usize,
-        shift_register: usize,
+        operand_register: u8,
+        shift_register: u8,
         shift_type: ShiftType,
     },
     ImmediateShiftedRegister {
-        operand_register: usize,
+        operand_register: u8,
         shift: u32,
         shift_type: ShiftType,
     },
@@ -142,6 +143,15 @@ pub enum RegisterTransferType {
 pub enum OffsetArgument {
     ImmdiateOffset(u8),
     RegisterOffset(u8),
+}
+
+impl OffsetArgument {
+    pub fn value(&self, registers: &RegisterFile) -> u8 {
+        match self {
+            OffsetArgument::ImmdiateOffset(value) => *value,
+            OffsetArgument::RegisterOffset(register_idx) => registers[*register_idx as usize] as u8,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -169,16 +179,16 @@ pub enum DecodedArmOpcode {
     DataProcessing {
         operand: DataProcessingOperand,
         /// Destination register index. Can be `PC_IDX` in which case the behavior of the opcode changes
-        rd: usize,
+        rd: u8,
         /// First operand register index
-        rn: usize,
+        rn: u8,
         sub_opcode: DataProcessingOpcode,
         set_flags: bool,
     },
 
     // LDM & STM
     BlockDataTransfer {
-        base_register: usize,
+        base_register: u8,
         transfer_type: RegisterTransferType,
         pre_increment: bool,    // Add offset before transfer. False implies post
         increment: bool,        // Offset adds. False implies down i.e. subtract
@@ -199,9 +209,9 @@ pub enum DecodedArmOpcode {
     },
 
     Swap {
-        base_register: usize,
-        src_register: usize,
-        dest_register: usize,
+        base_register: u8,
+        src_register: u8,
+        dest_register: u8,
         word: bool, // 32 bits. False implies swap 8 bits
     },
     Swi {
@@ -221,8 +231,7 @@ fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
         return None;
     }
 
-    let mask = 1 << 24;
-    if opcode & mask == mask {
+    if test_bit!(opcode, 24) {
         Some(DecodedArmOpcode::BL {
             offset: opcode & 0xFFFFFF,
         })
@@ -234,7 +243,7 @@ fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
 }
 
 pub fn execute_b<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType, mut offset: u32) {
-    if offset & 0x800000 != 0x00 {
+    if test_bit!(offset, 23) {
         // Offset is a 24-bit signed value
         offset |= 0xFF000000; // Sign extend to 32-bits
     }
@@ -270,7 +279,7 @@ pub fn execute_arm_to_thumb_bx<BusType: SystemBus>(
 ) {
     assert_eq!(cpu.registers.state(), CpuState::Arm);
     let mut destination = cpu.registers[register_idx];
-    if destination & 0b1 == 0b1 {
+    if test_bit!(destination, 0) {
         destination &= !1;
         cpu.toggle_cpu_state();
     }
@@ -286,20 +295,20 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
         return None;
     }
 
-    let sub_opcode = ((opcode & 0x1E00000) >> 21) as u8;
+    let sub_opcode = extract_mask!(opcode, 0x1E00000u32) as u8;
+    let set_flags = test_bit!(opcode, 20);
     // Set condition code flag must be *true* for test and compare opcodes
-    if (0x8..=0xB).contains(&sub_opcode) && (opcode & (1 << 20) != (1 << 20)) {
+    if (0x8..=0xB).contains(&sub_opcode) && !set_flags {
         return None;
     }
-    let set_flags = opcode & (1 << 20) == (1 << 20);
 
     // First operand register must be *0000* for MOV and MVN
     if (sub_opcode == 0xD || sub_opcode == 0xF) && (opcode & (0b1111 << 16) != 0) {
         return None;
     }
 
-    let rn = (opcode as usize & (0b1111 << 16)) >> 16;
-    let rd = (opcode as usize & (0b1111 << 12)) >> 12;
+    let rn = extract_mask!(opcode, 0xF0000u32) as u8;
+    let rd = extract_mask!(opcode, 0xF000u32) as u8;
     if (0x8..=0xB).contains(&sub_opcode) {
         // Destination register must be *0000* or *1111* for TST/TEQ/CMP/CMN
         if rd != 0b0000 && rd != 0b1111 {
@@ -309,11 +318,11 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
 
     let sub_opcode = unsafe { std::mem::transmute::<u8, DataProcessingOpcode>(sub_opcode) };
 
-    let is_immediate = opcode & (1 << 25) != 0;
+    let is_immediate = test_bit!(opcode, 25);
     let operand = if is_immediate {
-        let nn = opcode & 0xFF;
+        let nn = extract_mask!(opcode, 0xFFu32);
         // Shifted in jumps of 2 so 7 instead of 8 to keep LSB 0
-        let shift = (opcode & 0xF00) >> 7;
+        let shift = extract_mask!(opcode, 0xF00u32) << 1;
 
         if shift != 0 {
             DataProcessingOperand::ShiftedImmediate { operand: nn, shift }
@@ -322,18 +331,18 @@ fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
         }
     } else {
         // Register
-        let shift_by_register = (opcode & 0x10) != 0;
-        if shift_by_register && (opcode & 0x80 != 0) {
+        let shift_by_register = test_bit!(opcode, 4);
+        if shift_by_register && test_bit!(opcode, 7) {
             // Bit 7 must be 0 when shifting by register
             return None;
         }
 
-        let operand_register = opcode as usize & 0xF;
+        let operand_register = extract_mask!(opcode, 0xFu32) as u8;
         let shift_type =
-            unsafe { std::mem::transmute::<u8, ShiftType>(((opcode & 0x60) >> 5) as u8) };
+            unsafe { std::mem::transmute::<u8, ShiftType>(extract_mask!(opcode, 0x60u32) as u8) };
 
         if shift_by_register {
-            let shift_register = ((opcode & 0xF00) >> 8) as usize;
+            let shift_register = extract_mask!(opcode, 0xF00u32) as u8;
             DataProcessingOperand::RegisterShiftedRegister {
                 operand_register,
                 shift_register,
@@ -407,14 +416,14 @@ pub fn execute_data_processing<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
     sub_opcode: DataProcessingOpcode,
-    rd: usize,
-    rn: usize,
+    rd: u8,
+    rn: u8,
     operand: DataProcessingOperand,
     set_flags: bool,
 ) {
     cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
 
-    let operand_a = cpu.registers[rn]; // rn might be aliased to rd and we need the initial value
+    let operand_a = cpu.registers[rn as usize]; // rn might be aliased to rd and we need the initial value
     let (operand_b, shifted_carry) = match operand {
         DataProcessingOperand::Immediate(value) => (value, None),
         DataProcessingOperand::ShiftedImmediate { operand, shift } => {
@@ -428,13 +437,13 @@ pub fn execute_data_processing<BusType: SystemBus>(
             shift_type,
         } => {
             // Only lower 8 bits of shift amount are used
-            let shift_amount = cpu.registers[shift_register] & 0xFF;
+            let shift_amount = extract_mask!(cpu.registers[shift_register as usize], 0xFFu32);
 
             bus.idle();
             cpu.registers[PC_IDX] += 4;
             cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ; // nOPC is 1 when shift(Rs)
 
-            let value = cpu.registers[operand_register];
+            let value = cpu.registers[operand_register as usize];
 
             let (value, carry) = shift(shift_type, value, shift_amount);
 
@@ -445,7 +454,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             shift: shift_amount,
             shift_type,
         } if shift_amount == 0 => {
-            let value = cpu.registers[operand_register];
+            let value = cpu.registers[operand_register as usize];
             match shift_type {
                 ShiftType::Lsl => (value, None), // No shift, C flag not affected
                 ShiftType::Lsr => (0, Some(value & (1 << 31) != 0)), // operand is 0, C flag is bit 31 of register
@@ -465,7 +474,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             shift: shift_amount,
             shift_type,
         } => {
-            let value = cpu.registers[operand_register];
+            let value = cpu.registers[operand_register as usize];
             let (value, carry) = shift(
                 shift_type,
                 value,
@@ -481,22 +490,22 @@ pub fn execute_data_processing<BusType: SystemBus>(
     };
 
     let (result, carry, overflow) = match sub_opcode {
-        DataProcessingOpcode::AND => execute_and(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::EOR => execute_eor(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::SUB => execute_sub(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::RSB => execute_rsb(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::ADD => execute_add(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::ADC => execute_adc(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::SBC => execute_sbc(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::RSC => execute_rsc(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::TST => execute_tst(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::TEQ => execute_teq(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::CMP => execute_cmp(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::CMN => execute_cmn(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::ORR => execute_orr(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::MOV => execute_mov(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::BIC => execute_bic(cpu, rd, rn, operand_b),
-        DataProcessingOpcode::MVN => execute_mvn(cpu, rd, rn, operand_b),
+        DataProcessingOpcode::AND => execute_and(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::EOR => execute_eor(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::SUB => execute_sub(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::RSB => execute_rsb(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::ADD => execute_add(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::ADC => execute_adc(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::SBC => execute_sbc(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::RSC => execute_rsc(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::TST => execute_tst(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::TEQ => execute_teq(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::CMP => execute_cmp(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::CMN => execute_cmn(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::ORR => execute_orr(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::MOV => execute_mov(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::BIC => execute_bic(cpu, rd as usize, rn as usize, operand_b),
+        DataProcessingOpcode::MVN => execute_mvn(cpu, rd as usize, rn as usize, operand_b),
     };
 
     if set_flags {
@@ -524,7 +533,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
         }
     }
 
-    if rd == PC_IDX {
+    if rd as usize == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
             cpu.registers.cpsr = cpu.registers.spsr_moded();
@@ -677,7 +686,7 @@ fn try_decode_ldm_stm(opcode: u32) -> Option<DecodedArmOpcode> {
     } else {
         RegisterTransferType::Store
     };
-    let base_register = (opcode as usize & 0xF0000) >> 16;
+    let base_register = ((opcode as usize & 0xF0000) >> 16) as u8;
     let rlist = opcode as u16;
 
     Some(DecodedArmOpcode::BlockDataTransfer {
@@ -694,7 +703,7 @@ fn try_decode_ldm_stm(opcode: u32) -> Option<DecodedArmOpcode> {
 pub fn execute_block_data_transfer<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
-    base_register: usize,
+    base_register: u8,
     transfer_type: RegisterTransferType,
     pre_increment: bool,
     increment: bool,
@@ -714,9 +723,9 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     let first = rlist.trailing_zeros() as usize;
     let rb_in_rlist = rlist & (1 << base_register) != 0;
     let pc_in_rlist = rlist & (1 << PC_IDX) != 0;
-    let rb_first_in_rlist = rb_in_rlist && (base_register == first);
+    let rb_first_in_rlist = rb_in_rlist && (base_register as usize == first);
 
-    let old_base_address = cpu.registers[base_register];
+    let old_base_address = cpu.registers[base_register as usize];
 
     let (mut address, new_base_address) = if increment {
         (
@@ -754,8 +763,8 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
             if RegisterTransferType::Store == transfer_type {
                 bus.write_word(address, cpu.registers[i], cpu.next_access);
                 if write_address_into_base && i == first {
-                    cpu.registers[base_register] = new_base_address;
-                    if base_register == PC_IDX {
+                    cpu.registers[base_register as usize] = new_base_address;
+                    if base_register as usize == PC_IDX {
                         reload_pipeline = true;
                     }
                 }
@@ -766,8 +775,8 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
                 }
                 if i == first {
                     if write_address_into_base {
-                        cpu.registers[base_register] = new_base_address;
-                        if base_register == PC_IDX {
+                        cpu.registers[base_register as usize] = new_base_address;
+                        if base_register as usize == PC_IDX {
                             reload_pipeline = true;
                         }
                     }
@@ -805,47 +814,47 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 }
 
 fn try_decode_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0E200090 != 0x00000090 {
+    if opcode & 0x0E000090 != 0x00000090 {
         return None;
     }
 
-    let pre_increment = opcode & (1 << 24) == (1 << 24); // or decrement
-    let increment = opcode & (1 << 23) == (1 << 23);
-    let immediate_offset = opcode & (1 << 22) == (1 << 22);
+    let pre_increment = test_bit!(opcode, 24); // or decrement
+    let increment = test_bit!(opcode, 23);
+    let immediate_offset = test_bit!(opcode, 22);
 
     let write_back = if pre_increment {
-        opcode & (1 << 21) == (1 << 21)
+        test_bit!(opcode, 21)
     } else {
         // If post indexing then writeback bit must always be `0` however
         // writeback is always enabled
-        if opcode & (1 << 21) == (1 << 21) {
+        if test_bit!(opcode, 21) {
             return None;
         }
         true
     };
-    let mut transfer_type = if opcode & (1 << 20) == (1 << 20) {
+    let mut transfer_type = if test_bit!(opcode, 20) {
         RegisterTransferType::Load
     } else {
         RegisterTransferType::Store
     };
 
-    let base_register = ((opcode & 0xF0000) >> 16) as u8;
-    let target_register = ((opcode & 0xF000) >> 12) as u8;
+    let base_register = extract_mask!(opcode, 0xF0000u32) as u8;
+    let target_register = extract_mask!(opcode, 0xF000u32) as u8;
 
     let offset = if immediate_offset {
-        let offset_high = ((opcode & 0xF00) >> 4) as u8;
-        let offset_low = opcode as u8 & 0xF;
+        let offset_high = (extract_mask!(opcode, 0xF00u32) << 4) as u8;
+        let offset_low = extract_mask!(opcode, 0xFu32) as u8;
         OffsetArgument::ImmdiateOffset(offset_high | offset_low)
     } else {
         // If register offset bits 11-8 are unused and must be 0000
         if opcode & 0xF00 != 0x000 {
             return None;
         }
-        let register = opcode as u8 & 0xF;
+        let register = extract_mask!(opcode, 0xFu32) as u8;
         OffsetArgument::RegisterOffset(register)
     };
 
-    let transfer_size = match (opcode & 0x60) >> 5 {
+    let transfer_size = match extract_mask!(opcode, 0x60u32) {
         0b00 if transfer_type == RegisterTransferType::Store => return None, // Reserved for SWP
         0b01 if transfer_type == RegisterTransferType::Store => DataTransferSize::HalfWord(false),
         0b10 if transfer_type == RegisterTransferType::Store => {
@@ -878,7 +887,72 @@ pub fn execute_data_transfer<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
     transfer_type: RegisterTransferType,
+    transfer_size: DataTransferSize,
+    pre_increment: bool,
+    increment: bool,
+    offset: OffsetArgument,
+    write_back: bool,
+    base_register: u8,
+    target_register: u8,
 ) {
+    cpu.registers.get_and_incr_pc(4);
+
+    // Base address is always read as PC + 8
+    let base_address = cpu.registers[base_register as usize];
+
+    let mut address = base_address;
+    if pre_increment {
+        if increment {
+            address += offset.value(&cpu.registers) as u32;
+        } else {
+            address -= offset.value(&cpu.registers) as u32;
+        }
+    }
+
+    match transfer_type {
+        RegisterTransferType::Store => match transfer_size {
+            DataTransferSize::Byte => panic!("STRB does not exist"),
+            DataTransferSize::HalfWord(_) => {
+                bus.write_half_word(
+                    address,
+                    cpu.registers[target_register as usize] as u16,
+                    ACCESS_NONSEQ,
+                );
+            }
+            DataTransferSize::DoubleWord => todo!("STRD not supported on ARMv4"),
+        },
+        RegisterTransferType::Load => match transfer_size {
+            DataTransferSize::Byte => {
+                let mut value = bus.read_byte(address, ACCESS_NONSEQ) as u32;
+                if test_bit!(value, 7) {
+                    value |= 0xFFFFFF00; // Sign extend
+                }
+                cpu.registers[target_register as usize] = value;
+            }
+            DataTransferSize::HalfWord(sign_extend) => {
+                let mut value = bus.read_half_word(address, ACCESS_NONSEQ) as u32;
+                if test_bit!(value, 15) && sign_extend {
+                    value |= 0xFFFF0000;
+                }
+                cpu.registers[target_register as usize] = value;
+            }
+            DataTransferSize::DoubleWord => todo!("LDRD not supported on ARMv4"),
+        },
+    }
+
+    if target_register as usize == PC_IDX && transfer_type == RegisterTransferType::Load {
+        cpu.reload_pipeline(bus);
+    }
+
+    if write_back {
+        cpu.registers[base_register as usize] = address;
+    }
+
+    if !pre_increment && let OffsetArgument::RegisterOffset(_) = offset {
+        //TODO: Post increment register offset
+    }
+
+    cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
 }
 
 fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
@@ -886,10 +960,10 @@ fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
         return None;
     }
 
-    let word = opcode & (1 << 22) == 0;
-    let src_register = opcode as usize & 0xF;
-    let dest_register = (opcode as usize >> 12) & 0xF;
-    let base_register = (opcode as usize >> 16) & 0xF;
+    let word = !test_bit!(opcode, 22);
+    let src_register = opcode as u8 & 0xF;
+    let dest_register = ((opcode >> 12) & 0xF) as u8;
+    let base_register = ((opcode >> 16) & 0xF) as u8;
 
     Some(DecodedArmOpcode::Swap {
         base_register,
@@ -902,32 +976,34 @@ fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
 pub fn execute_swp<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
-    base_register: usize,
-    src_register: usize,
-    dest_register: usize,
+    base_register: u8,
+    src_register: u8,
+    dest_register: u8,
     word: bool,
 ) {
     cpu.registers.get_and_incr_pc(4);
 
-    let base_address = cpu.registers[base_register];
-    let src_value = cpu.registers[src_register];
+    let base_address = cpu.registers[base_register as usize];
+    let src_value = cpu.registers[src_register as usize];
 
     if word {
-        cpu.registers[dest_register] = bus.read_word(base_address, ACCESS_NONSEQ);
+        cpu.registers[dest_register as usize] = bus.read_word(base_address, ACCESS_NONSEQ);
         if base_address != (base_address & !3) {
-            cpu.registers[dest_register] =
-                ror(cpu.registers[dest_register], (base_address & 3) * 8);
+            cpu.registers[dest_register as usize] = ror(
+                cpu.registers[dest_register as usize],
+                (base_address & 3) * 8,
+            );
         }
         bus.write_word(base_address, src_value, ACCESS_NONSEQ | ACCESS_LOCK);
     } else {
-        cpu.registers[dest_register] = bus.read_byte(base_address, ACCESS_NONSEQ) as u32;
+        cpu.registers[dest_register as usize] = bus.read_byte(base_address, ACCESS_NONSEQ) as u32;
         bus.write_byte(base_address, src_value as u8, ACCESS_NONSEQ | ACCESS_LOCK);
     }
 
     bus.idle();
     cpu.next_access = ACCESS_CODE;
 
-    if dest_register == PC_IDX {
+    if dest_register as usize == PC_IDX {
         cpu.reload_pipeline(bus);
     }
 }

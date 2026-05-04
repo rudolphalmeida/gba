@@ -175,9 +175,27 @@ impl Arm7Cpu {
                 write_address_into_base,
                 rlist,
             ),
-            DecodedArmOpcode::DataTransfer { transfer_type, .. } => {
-                execute_data_transfer(self, bus, transfer_type)
-            }
+            DecodedArmOpcode::DataTransfer {
+                transfer_type,
+                transfer_size,
+                pre_increment,
+                increment,
+                offset,
+                write_back,
+                base_register,
+                target_register,
+            } => execute_data_transfer(
+                self,
+                bus,
+                transfer_type,
+                transfer_size,
+                pre_increment,
+                increment,
+                offset,
+                write_back,
+                base_register,
+                target_register,
+            ),
             DecodedArmOpcode::Swap {
                 base_register,
                 src_register,
@@ -691,7 +709,8 @@ mod tests {
     #[test_case("arm_ldm_stm")]
     #[test_case("arm_swp")]
     #[test_case("arm_swi")]
-    #[test_case("arm_ldr_str_immediate_offset")]
+    #[test_case("arm_ldrh_strh")]
+    // #[test_case("arm_ldrsb_ldrsh")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -728,8 +747,8 @@ mod tests {
 
     #[test]
     fn test_arm_opcode_exact_case() {
-        let test_state = read_test_data("arm_swp");
-        let exact_opcode = 17809552;
+        let test_state = read_test_data("arm_ldrh_strh");
+        let exact_opcode = 23705777;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 

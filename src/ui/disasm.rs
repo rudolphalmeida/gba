@@ -1,7 +1,10 @@
 use crate::ui::{COLOR_MNEMONIC, COLOR_REGISTER};
 use eframe::egui;
-use gba::cpu::opcodes::{
-    Condition, DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode, ror,
+use gba::{
+    cpu::opcodes::{
+        Condition, DataProcessingOpcode, DataProcessingOperand, DecodedArmOpcode, Opcode, ror,
+    },
+    test_bit,
 };
 
 pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) {
@@ -55,7 +58,7 @@ fn format_decoded_arm_opcode(ui: &mut egui::Ui, opcode: &DecodedArmOpcode) {
 }
 
 fn format_opcode_b_bl(ui: &mut egui::Ui, mut offset: u32, is_bl: bool) {
-    if !is_bl && offset & 0x800000 != 0x00 {
+    if !is_bl && test_bit!(offset, 24) {
         // Offset is a 24-bit signed value
         offset |= 0xFF000000; // Sign extend to 32-bits
     }
@@ -82,8 +85,8 @@ fn format_register(idx: usize) -> String {
 fn format_data_processing(
     ui: &mut egui::Ui,
     operand: &DataProcessingOperand,
-    rd: usize,
-    rn: usize,
+    rd: u8,
+    rn: u8,
     sub_opcode: &DataProcessingOpcode,
     _set_flags: bool,
 ) {
@@ -98,7 +101,10 @@ fn format_data_processing(
     } else {
         rn
     };
-    ui.colored_label(COLOR_REGISTER, format_register(register_idx).to_string());
+    ui.colored_label(
+        COLOR_REGISTER,
+        format_register(register_idx as usize).to_string(),
+    );
     ui.label(", ".to_string());
     format_data_processing_operand(ui, operand);
 }
