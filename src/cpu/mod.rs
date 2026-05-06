@@ -748,7 +748,7 @@ mod tests {
     #[test]
     fn test_arm_opcode_exact_case() {
         let test_state = read_test_data("arm_ldrh_strh");
-        let exact_opcode = 23705777;
+        let exact_opcode = 28025016;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 

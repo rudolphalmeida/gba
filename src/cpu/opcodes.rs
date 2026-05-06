@@ -895,10 +895,10 @@ pub fn execute_data_transfer<BusType: SystemBus>(
     base_register: u8,
     target_register: u8,
 ) {
-    cpu.registers.get_and_incr_pc(4);
-
     // Base address is always read as PC + 8
     let base_address = cpu.registers[base_register as usize];
+
+    cpu.registers.get_and_incr_pc(4);
 
     let mut address = base_address;
     if pre_increment {
@@ -940,19 +940,29 @@ pub fn execute_data_transfer<BusType: SystemBus>(
         },
     }
 
-    if target_register as usize == PC_IDX && transfer_type == RegisterTransferType::Load {
-        cpu.reload_pipeline(bus);
+    if !pre_increment {
+        if let OffsetArgument::RegisterOffset(_) = offset {
+            // TODO: Update register offset
+        }
     }
 
+    let mut reload_pipeline = false;
     if write_back {
-        cpu.registers[base_register as usize] = address;
+        if increment {
+            cpu.registers[base_register as usize] += offset.value(&cpu.registers) as u32;
+        } else {
+            cpu.registers[base_register as usize] -= offset.value(&cpu.registers) as u32;
+        }
+        reload_pipeline = base_register as usize == PC_IDX;
     }
 
-    if !pre_increment && let OffsetArgument::RegisterOffset(_) = offset {
-        //TODO: Post increment register offset
+    if (target_register as usize == PC_IDX && transfer_type == RegisterTransferType::Load)
+        || reload_pipeline
+    {
+        cpu.reload_pipeline(bus);
+    } else {
+        cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
     }
-
-    cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
 }
 
 fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
