@@ -15,7 +15,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_ldm_stm,
         try_decode_swp,
         try_decode_swi,
-        try_decode_data_transfer,
+        try_decode_half_word_signed_transfer,
     ];
 
     for decoder in decoders {
@@ -146,10 +146,10 @@ pub enum OffsetArgument {
 }
 
 impl OffsetArgument {
-    pub fn value(&self, registers: &RegisterFile) -> u8 {
+    pub fn value(&self, registers: &RegisterFile) -> u32 {
         match self {
-            OffsetArgument::ImmdiateOffset(value) => *value,
-            OffsetArgument::RegisterOffset(register_idx) => registers[*register_idx as usize] as u8,
+            OffsetArgument::ImmdiateOffset(value) => *value as u32,
+            OffsetArgument::RegisterOffset(register_idx) => registers[*register_idx as usize],
         }
     }
 }
@@ -197,7 +197,7 @@ pub enum DecodedArmOpcode {
         rlist: u16,
     },
 
-    DataTransfer {
+    HalfWordSignedTransfer {
         transfer_type: RegisterTransferType,
         transfer_size: DataTransferSize,
         pre_increment: bool, // or pre_decrement
@@ -813,7 +813,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
     }
 }
 
-fn try_decode_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
+fn try_decode_half_word_signed_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
     if opcode & 0x0E000090 != 0x00000090 {
         return None;
     }
@@ -871,7 +871,7 @@ fn try_decode_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
         _ => panic!("Impossible match arm"),
     };
 
-    Some(DecodedArmOpcode::DataTransfer {
+    Some(DecodedArmOpcode::HalfWordSignedTransfer {
         transfer_type,
         transfer_size,
         pre_increment,
@@ -883,7 +883,7 @@ fn try_decode_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
     })
 }
 
-pub fn execute_data_transfer<BusType: SystemBus>(
+pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
     cpu: &mut Arm7Cpu,
     bus: &mut BusType,
     transfer_type: RegisterTransferType,
@@ -903,9 +903,9 @@ pub fn execute_data_transfer<BusType: SystemBus>(
     let mut address = base_address;
     if pre_increment {
         if increment {
-            address += offset.value(&cpu.registers) as u32;
+            address = address.wrapping_add(offset.value(&cpu.registers));
         } else {
-            address -= offset.value(&cpu.registers) as u32;
+            address = address.wrapping_sub(offset.value(&cpu.registers));
         }
     }
 
@@ -948,10 +948,13 @@ pub fn execute_data_transfer<BusType: SystemBus>(
 
     let mut reload_pipeline = false;
     if write_back {
+        // Cannot use `address` here since the value of base register might be updated in a load
         if increment {
-            cpu.registers[base_register as usize] += offset.value(&cpu.registers) as u32;
+            cpu.registers[base_register as usize] =
+                cpu.registers[base_register as usize].wrapping_add(offset.value(&cpu.registers));
         } else {
-            cpu.registers[base_register as usize] -= offset.value(&cpu.registers) as u32;
+            cpu.registers[base_register as usize] =
+                cpu.registers[base_register as usize].wrapping_sub(offset.value(&cpu.registers));
         }
         reload_pipeline = base_register as usize == PC_IDX;
     }
@@ -971,9 +974,9 @@ fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
     }
 
     let word = !test_bit!(opcode, 22);
-    let src_register = opcode as u8 & 0xF;
-    let dest_register = ((opcode >> 12) & 0xF) as u8;
-    let base_register = ((opcode >> 16) & 0xF) as u8;
+    let src_register = extract_mask!(opcode, 0xFu32) as u8;
+    let dest_register = extract_mask!(opcode, 0xF000u32) as u8;
+    let base_register = extract_mask!(opcode, 0xF0000u32) as u8;
 
     Some(DecodedArmOpcode::Swap {
         base_register,
