@@ -1,10 +1,10 @@
 use crate::cpu::opcodes::{
-    Condition, DecodedArmOpcode, Opcode, check_condition, condition_from_opcode, decode_arm_opcode,
-    execute_arm_to_thumb_bx, execute_b, execute_bl, execute_block_data_transfer,
-    execute_data_processing, execute_half_word_signed_transfer, execute_swi, execute_swp,
+    check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
+    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_swi,
+    execute_swp, Condition, DecodedArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
-use crate::system_bus::{ACCESS_CODE, ACCESS_SEQ, SystemBus};
+use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use circular_buffer::CircularBuffer;
 use registers::RegisterFile;
 
@@ -210,15 +210,15 @@ pub enum OpcodeTraceLog {
 
 #[cfg(test)]
 mod tests {
+    use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
-    use crate::cpu::registers::{CpuMode, CpuState, PC_IDX, RegisterFile};
-    use crate::system_bus::{ACCESS_CODE, SystemBus};
+    use crate::system_bus::{SystemBus, ACCESS_CODE};
     use circular_buffer::CircularBuffer;
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fmt;
     use std::fs::File;
-    use std::io::{BufReader, Write, stderr};
+    use std::io::{stderr, BufReader, Write};
     use test_case::test_case;
 
     #[test]
@@ -336,7 +336,7 @@ mod tests {
             access: u8,
         ) {
             if let Some(transaction) = self.find_transaction_for_addr(address) {
-                assert_eq!(transaction.kind, 2); // 2 is write for ARM7TDMI tests
+                assert_eq!(transaction.kind, 2); // 2 is 'write' for ARM7TDMI tests
                 assert_eq!(transaction.data, data.into());
                 assert_eq!(transaction.access as u8, access);
             } else {
@@ -722,9 +722,9 @@ mod tests {
         {
             let mut lock = stderr().lock();
             if opcode_failures.len() > 1 {
-                for (opcode, failure) in opcode_failures.iter() {
+                opcode_failures.iter().for_each(|(opcode, failure)| {
                     writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
-                }
+                });
             }
         }
 
@@ -734,7 +734,7 @@ mod tests {
     #[test]
     fn test_arm_opcode_exact_case() {
         let test_state = read_test_data("arm_ldrh_strh");
-        let exact_opcode = 27721919;
+        let exact_opcode = 7274685;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 
@@ -760,10 +760,10 @@ mod tests {
 
         {
             let mut lock = stderr().lock();
-            if opcode_failures.len() > 1 {
-                for (opcode, failure) in opcode_failures.iter() {
+            if opcode_failures.len() > 0 {
+                opcode_failures.iter().for_each(|(opcode, failure)| {
                     writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
-                }
+                });
             }
         }
 
