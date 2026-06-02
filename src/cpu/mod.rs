@@ -7,6 +7,7 @@ use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
 use circular_buffer::CircularBuffer;
 use registers::RegisterFile;
+use std::ops::BitAnd;
 
 pub mod opcodes;
 pub mod registers;
@@ -63,7 +64,7 @@ impl Arm7Cpu {
     }
 
     fn reload_pipeline16<BusType: SystemBus>(&mut self, bus: &mut BusType) {
-        let addr = self.registers[PC_IDX];
+        let addr = self.registers[PC_IDX] & !1;
         self.pipeline[0] =
             bus.read_half_word(self.registers.get_and_incr_pc(2), self.next_access) as u32;
         self.pipeline[1] =
@@ -72,10 +73,14 @@ impl Arm7Cpu {
     }
 
     fn reload_pipeline32<BusType: SystemBus>(&mut self, bus: &mut BusType) {
-        let addr = self.registers[PC_IDX];
-        self.pipeline[0] = bus.read_word(self.registers.get_and_incr_pc(4), self.next_access);
-        self.pipeline[1] =
-            bus.read_word(self.registers.get_and_incr_pc(4), ACCESS_CODE | ACCESS_SEQ);
+        self.pipeline[0] = bus.read_word(
+            self.registers.get_and_incr_pc(4).bitand(!3),
+            self.next_access,
+        );
+        self.pipeline[1] = bus.read_word(
+            self.registers.get_and_incr_pc(4).bitand(!3),
+            ACCESS_CODE | ACCESS_SEQ,
+        );
         self.next_access = ACCESS_CODE | ACCESS_SEQ;
 
         // TODO: IRQ disable

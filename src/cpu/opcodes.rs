@@ -919,7 +919,7 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
             DataTransferSize::HalfWord(_) => {
                 bus.write_half_word(
                     address,
-                    cpu.registers[target_register as usize] as u16,
+                    cpu.registers[target_register] as u16,
                     ACCESS_NONSEQ,
                 );
             }
