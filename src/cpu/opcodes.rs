@@ -910,7 +910,8 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
         }
     }
 
-    let mut reload_pipeline = false;
+    let mut reload_pipeline =
+        transfer_type == RegisterTransferType::Load && target_register == PC_IDX;
     let offset_before_load = offset.value(&cpu.registers);
 
     match transfer_type {
@@ -933,23 +934,37 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
                 }
                 cpu.registers[target_register] = value;
             }
-            DataTransferSize::HalfWord(sign_extend) => {
-                let mut value = bus.read_half_word(address, ACCESS_NONSEQ) as u32;
-                if address != (address & !1) {
-                    value = ror(value, (address & 1) * 8);
+            DataTransferSize::HalfWord(false) if address & 1 == 1 => {
+                cpu.registers[target_register] = ror(
+                    bus.read_half_word(address, ACCESS_NONSEQ) as u32,
+                    (address & 1) * 8,
+                );
+            }
+            DataTransferSize::HalfWord(false) if address & 1 == 0 => {
+                cpu.registers[target_register] = bus.read_half_word(address, ACCESS_NONSEQ) as u32;
+            }
+            DataTransferSize::HalfWord(true) if address & 1 == 1 => {
+                // A half word LDRSH does a rotated by 8 of the read value but only
+                // results in the lower 8 bits (like a LDRB). It then sign-extends based on the LDRB
+                // result
+                // https://rust-console.github.io/gbatek-gbaonly/#mis-aligned-ldrhldrsh-does-or-does-not-do-strange-things
+                let mut value =
+                    bus.read_half_word(address, ACCESS_NONSEQ).rotate_right(8) as u8 as u32;
+                if test_bit!(value, 7) {
+                    value |= 0xFFFFFF00;
                 }
-                if test_bit!(value, 15) && sign_extend {
+                cpu.registers[target_register] = value;
+            }
+            DataTransferSize::HalfWord(true) if address & 1 == 0 => {
+                let mut value = bus.read_half_word(address, ACCESS_NONSEQ) as u32;
+                if test_bit!(value, 15) {
                     value |= 0xFFFF0000;
                 }
                 cpu.registers[target_register] = value;
-                reload_pipeline = target_register == PC_IDX;
             }
             DataTransferSize::DoubleWord => todo!("LDRD not supported on ARMv4"),
+            _ => panic!("Impossible branch"),
         },
-    }
-
-    if !pre_increment && let OffsetArgument::RegisterOffset(_) = offset {
-        // TODO: Update register offset
     }
 
     if write_back

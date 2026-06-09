@@ -701,7 +701,7 @@ mod tests {
     #[test_case("arm_swp")]
     #[test_case("arm_swi")]
     #[test_case("arm_ldrh_strh")]
-    // #[test_case("arm_ldrsb_ldrsh")]
+    #[test_case("arm_ldrsb_ldrsh")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -726,7 +726,7 @@ mod tests {
 
         {
             let mut lock = stderr().lock();
-            if opcode_failures.len() > 1 {
+            if !opcode_failures.is_empty() {
                 opcode_failures.iter().for_each(|(opcode, failure)| {
                     writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
                 });
@@ -738,8 +738,8 @@ mod tests {
 
     #[test]
     fn test_arm_opcode_exact_case() {
-        let test_state = read_test_data("arm_ldrh_strh");
-        let exact_opcode = 7274685;
+        let test_state = read_test_data("arm_ldrsb_ldrsh");
+        let exact_opcode = 30851060;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 
@@ -765,7 +765,7 @@ mod tests {
 
         {
             let mut lock = stderr().lock();
-            if opcode_failures.len() > 0 {
+            if !opcode_failures.is_empty() {
                 opcode_failures.iter().for_each(|(opcode, failure)| {
                     writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
                 });
