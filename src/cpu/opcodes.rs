@@ -141,14 +141,19 @@ pub enum RegisterTransferType {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OffsetArgument {
-    ImmediateOffset(u8),
+    ImmediateOffset(u32),
     RegisterOffset(u8),
+    ShiftedOffset {
+        shift_amount: u8,
+        shift_type: ShiftType,
+        offset_register: u8,
+    },
 }
 
 impl OffsetArgument {
     pub fn value(&self, registers: &RegisterFile) -> u32 {
         match self {
-            OffsetArgument::ImmediateOffset(value) => *value as u32,
+            OffsetArgument::ImmediateOffset(value) => *value,
             OffsetArgument::RegisterOffset(register_idx) => {
                 registers[*register_idx as usize]
                     - if *register_idx as usize == PC_IDX {
@@ -157,6 +162,7 @@ impl OffsetArgument {
                         0
                     }
             }
+            OffsetArgument::ShiftedOffset { .. } => todo!(),
         }
     }
 }
@@ -168,6 +174,8 @@ pub enum DataTransferSize {
     /// true: Signed half word via LDRSH i.e. sign extend
     /// false: Store half word via STRH, Load unsigned halfword via LDRH i.e. zero extend
     HalfWord(bool),
+    /// Word - For LDR, STR
+    Word,
     /// Only unsigned load/store supported
     DoubleWord,
 }
@@ -204,15 +212,29 @@ pub enum DecodedArmOpcode {
         rlist: u16,
     },
 
+    // LDRH, STRH, LDRSB, LDRSH
     HalfWordSignedTransfer {
         transfer_type: RegisterTransferType,
-        transfer_size: DataTransferSize,
-        pre_increment: bool, // or pre_decrement
+        transfer_size: DataTransferSize, // Only Byte or Half word for GBA
+        pre_increment: bool,             // or pre_decrement
         increment: bool,
         offset: OffsetArgument,
         write_back: bool,
         base_register: u8,
         target_register: u8,
+    },
+
+    SingleDataTransfer {
+        transfer_size: DataTransferSize, // Only Byte or Word
+        transfer_type: RegisterTransferType,
+        offset: OffsetArgument,
+        write_back: bool,
+        pre_increment: bool, // or pre_decrement
+        increment: bool,
+        base_register: u8,
+        target_register: u8,
+
+        force_non_privileged: bool,
     },
 
     Swap {
@@ -844,8 +866,8 @@ fn try_decode_half_word_signed_transfer(opcode: u32) -> Option<DecodedArmOpcode>
     let target_register = extract_mask!(opcode, 0xF000u32) as u8;
 
     let offset = if immediate_offset {
-        let offset_high = (extract_mask!(opcode, 0xF00u32) << 4) as u8;
-        let offset_low = extract_mask!(opcode, 0xFu32) as u8;
+        let offset_high = extract_mask!(opcode, 0xF00u32) << 4;
+        let offset_low = extract_mask!(opcode, 0xFu32);
         OffsetArgument::ImmediateOffset(offset_high | offset_low)
     } else {
         let register = extract_mask!(opcode, 0xFu32) as u8;
@@ -925,6 +947,7 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
                 );
             }
             DataTransferSize::DoubleWord => todo!("STRD not supported on ARMv4"),
+            _ => panic!("Word size transfer not supported in this opcode"),
         },
         RegisterTransferType::Load => match transfer_size {
             DataTransferSize::Byte => {
@@ -963,7 +986,7 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
                 cpu.registers[target_register] = value;
             }
             DataTransferSize::DoubleWord => todo!("LDRD not supported on ARMv4"),
-            _ => panic!("Impossible branch"),
+            _ => panic!("Word size transfer not supported in this opcode"),
         },
     }
 
@@ -996,6 +1019,66 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
     } else {
         cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
     }
+}
+
+fn try_decode_single_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
+    if extract_mask!(opcode, 0x0C000000u32) != 0b01 {
+        return None;
+    }
+
+    let immediate_offset = test_bit!(opcode, 25);
+    let pre_increment = test_bit!(opcode, 24);
+    let increment = test_bit!(opcode, 23);
+
+    let transfer_size = if test_bit!(opcode, 22) {
+        DataTransferSize::Byte
+    } else {
+        DataTransferSize::Word
+    };
+    let force_non_privileged = !pre_increment && test_bit!(opcode, 21);
+    let write_back = !pre_increment || test_bit!(opcode, 21);
+
+    let transfer_type = if test_bit!(opcode, 20) {
+        RegisterTransferType::Load
+    } else {
+        RegisterTransferType::Store
+    };
+
+    let base_register = extract_mask!(opcode, 0xF0000u32) as u8;
+    let target_register = extract_mask!(opcode, 0xF000u32) as u8;
+
+    let offset = if immediate_offset {
+        OffsetArgument::ImmediateOffset(extract_mask!(opcode, 0xFFFu32))
+    } else {
+        todo!()
+    };
+
+    Some(DecodedArmOpcode::SingleDataTransfer {
+        transfer_size,
+        transfer_type,
+        pre_increment,
+        increment,
+        base_register,
+        target_register,
+        force_non_privileged,
+        write_back,
+        offset,
+    })
+}
+
+pub fn execute_single_data_transfer<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    transfer_type: RegisterTransferType,
+    transfer_size: DataTransferSize,
+    pre_increment: bool,
+    increment: bool,
+    offset: OffsetArgument,
+    write_back: bool,
+    base_register: u8,
+    target_register: u8,
+    force_non_privileged: bool,
+) {
 }
 
 fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {

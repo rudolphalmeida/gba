@@ -1,7 +1,8 @@
 use crate::cpu::opcodes::{
     check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_swi,
-    execute_swp, Condition, DecodedArmOpcode, Opcode,
+    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_single_data_transfer,
+    execute_swi, execute_swp, Condition,
+    DecodedArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
@@ -186,6 +187,29 @@ impl Arm7Cpu {
                 write_back,
                 base_register,
                 target_register,
+            ),
+            DecodedArmOpcode::SingleDataTransfer {
+                transfer_type,
+                transfer_size,
+                pre_increment,
+                increment,
+                offset,
+                write_back,
+                base_register,
+                target_register,
+                force_non_privileged,
+            } => execute_single_data_transfer(
+                self,
+                bus,
+                transfer_type,
+                transfer_size,
+                pre_increment,
+                increment,
+                offset,
+                write_back,
+                base_register,
+                target_register,
+                force_non_privileged,
             ),
             DecodedArmOpcode::Swap {
                 base_register,
@@ -702,6 +726,7 @@ mod tests {
     #[test_case("arm_swi")]
     #[test_case("arm_ldrh_strh")]
     #[test_case("arm_ldrsb_ldrsh")]
+    #[test_case("arm_ldr_str_immediate_offset")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
