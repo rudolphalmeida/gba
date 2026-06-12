@@ -1,7 +1,7 @@
 use super::registers::CondFlag;
-use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ};
+use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
+use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
 use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
@@ -16,6 +16,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_swp,
         try_decode_swi,
         try_decode_half_word_signed_transfer,
+        try_decode_single_data_transfer,
     ];
 
     for decoder in decoders {
@@ -1026,7 +1027,7 @@ fn try_decode_single_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
         return None;
     }
 
-    let immediate_offset = test_bit!(opcode, 25);
+    let immediate_offset = !test_bit!(opcode, 25);
     let pre_increment = test_bit!(opcode, 24);
     let increment = test_bit!(opcode, 23);
 
@@ -1079,6 +1080,80 @@ pub fn execute_single_data_transfer<BusType: SystemBus>(
     target_register: u8,
     force_non_privileged: bool,
 ) {
+    let base_register = base_register as usize;
+    let target_register = target_register as usize;
+
+    let base_address = cpu.registers[base_register];
+
+    cpu.registers.get_and_incr_pc(4);
+
+    let mut address = base_address;
+    let offset_before_load = offset.value(&cpu.registers);
+    if pre_increment {
+        if increment {
+            address = address.wrapping_add(offset_before_load);
+        } else {
+            address = address.wrapping_sub(offset_before_load);
+        }
+    }
+
+    let mut reload_pipeline =
+        transfer_type == RegisterTransferType::Load && target_register == PC_IDX;
+
+    match transfer_type {
+        RegisterTransferType::Store => match transfer_size {
+            DataTransferSize::Byte => {
+                bus.write_byte(address, cpu.registers[target_register] as u8, ACCESS_NONSEQ);
+            }
+            DataTransferSize::Word => {
+                bus.write_word(address, cpu.registers[target_register], ACCESS_NONSEQ);
+            }
+            _ => panic!("Impossible word size for STR"),
+        },
+        RegisterTransferType::Load => match transfer_size {
+            DataTransferSize::Byte => {
+                cpu.registers[target_register] = bus.read_byte(address, ACCESS_NONSEQ) as u32;
+            }
+            DataTransferSize::Word => {
+                let mut value = bus.read_word(address, ACCESS_NONSEQ);
+                if address != (address & !3) {
+                    value = ror(value, (address & 0b11) * 8);
+                }
+                cpu.registers[target_register] = value;
+            }
+            _ => panic!("Impossible word size for LDR"),
+        },
+    }
+
+    if write_back
+        // If target and base register are same then preference the value read
+        // rather than the base register update
+        && !(target_register == base_register
+            && transfer_type == RegisterTransferType::Load)
+    {
+        let offset_value = if transfer_type == RegisterTransferType::Load
+            && let OffsetArgument::RegisterOffset(register_idx) = offset
+            && register_idx as usize == target_register
+        {
+            offset_before_load
+        } else {
+            offset.value(&cpu.registers)
+        };
+
+        // Cannot use `address` here since the value of base register might be updated in a load
+        if increment {
+            cpu.registers[base_register] = cpu.registers[base_register].wrapping_add(offset_value);
+        } else {
+            cpu.registers[base_register] = cpu.registers[base_register].wrapping_sub(offset_value);
+        }
+        reload_pipeline |= base_register == PC_IDX;
+    }
+
+    if reload_pipeline {
+        cpu.reload_pipeline(bus);
+    } else {
+        cpu.next_access = ACCESS_CODE | ACCESS_NONSEQ;
+    }
 }
 
 fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
