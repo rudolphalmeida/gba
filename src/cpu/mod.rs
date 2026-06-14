@@ -727,6 +727,7 @@ mod tests {
     #[test_case("arm_ldrh_strh")]
     #[test_case("arm_ldrsb_ldrsh")]
     #[test_case("arm_ldr_str_immediate_offset")]
+    #[test_case("arm_ldr_str_register_offset")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -763,15 +764,12 @@ mod tests {
 
     #[test]
     fn test_arm_opcode_exact_case() {
-        let test_state = read_test_data("arm_ldrsb_ldrsh");
-        let exact_opcode = 30851060;
+        let test_state = read_test_data("arm_ldr_str_register_offset");
+        let exact_opcode = 130592367;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 
-        for test_case in test_state.iter() {
-            if test_case.opcode != exact_opcode {
-                continue;
-            }
+        for test_case in test_state.iter().filter(|case| case.opcode == exact_opcode) {
             let mut bus = TransactionSystemBus {
                 test_state: test_case,
                 opcode: test_case.opcode,

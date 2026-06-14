@@ -1,7 +1,7 @@
 use super::registers::CondFlag;
+use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
-use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
-use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
+use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ};
 use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
@@ -163,7 +163,19 @@ impl OffsetArgument {
                         0
                     }
             }
-            OffsetArgument::ShiftedOffset { .. } => todo!(),
+            OffsetArgument::ShiftedOffset {
+                shift_amount,
+                shift_type,
+                offset_register,
+            } => {
+                shift(
+                    *shift_type,
+                    registers[*offset_register as usize],
+                    *shift_amount as u32,
+                    registers.carry(),
+                )
+                .0
+            }
         }
     }
 }
@@ -414,9 +426,21 @@ pub fn ror(value: u32, amount: u32) -> u32 {
 }
 
 /// Calls the proper shift function and returns the shifted (rotated) value and shifted out carry
-fn shift(shift_type: ShiftType, value: u32, amount: u32) -> (u32, bool) {
+fn shift(shift_type: ShiftType, value: u32, amount: u32, carry_flag: bool) -> (u32, Option<bool>) {
     if amount == 0 {
-        return (value, false);
+        return match shift_type {
+            ShiftType::Lsl => (value, None), // No shift, C flag not affected
+            ShiftType::Lsr => (0, Some(value & (1 << 31) != 0)), // operand is 0, C flag is bit 31 of register
+            ShiftType::Asr => (((value as i32) >> 31) as u32, Some(value & (1 << 31) != 0)), // all operand bit and C are copies of bit 31 of register value
+            ShiftType::Ror => {
+                // Same as ror(value, 1) but bit 31 set to current C
+                let carry = carry_flag;
+                let result = ror(value, 1);
+                let mask = 1 << 31;
+                let result = if carry { result | mask } else { result & !mask };
+                (result, Some(value & 1 != 0))
+            }
+        };
     }
 
     let expanded_value = value as u64;
@@ -425,20 +449,20 @@ fn shift(shift_type: ShiftType, value: u32, amount: u32) -> (u32, bool) {
     match shift_type {
         ShiftType::Lsl => (
             lsl(value, amount),
-            ((expanded_value.unbounded_shl(expanded_amount - 1)) >> 31 & 0b1) != 0,
+            Some(((expanded_value.unbounded_shl(expanded_amount - 1)) >> 31 & 0b1) != 0),
         ),
         ShiftType::Lsr => (
             lsr(value, amount),
-            (expanded_value.unbounded_shr(expanded_amount - 1)) & 0b1 != 0,
+            Some((expanded_value.unbounded_shr(expanded_amount - 1)) & 0b1 != 0),
         ),
         ShiftType::Asr => (
             asr(value, amount),
-            ((expanded_value as i32 as i64).unbounded_shr(expanded_amount - 1)) & 0b1 != 0,
+            Some(((expanded_value as i32 as i64).unbounded_shr(expanded_amount - 1)) & 0b1 != 0),
         ),
         ShiftType::Ror => {
             let res = ror(value, amount);
             let carry = (res >> 31) & 0b1 != 0;
-            (res, carry)
+            (res, Some(carry))
         }
     }
 }
@@ -476,28 +500,10 @@ pub fn execute_data_processing<BusType: SystemBus>(
 
             let value = cpu.registers[operand_register as usize];
 
-            let (value, carry) = shift(shift_type, value, shift_amount);
-
-            (value, if shift_amount != 0 { Some(carry) } else { None })
-        }
-        DataProcessingOperand::ImmediateShiftedRegister {
-            operand_register,
-            shift: 0,
-            shift_type,
-        } => {
-            let value = cpu.registers[operand_register as usize];
-            match shift_type {
-                ShiftType::Lsl => (value, None), // No shift, C flag not affected
-                ShiftType::Lsr => (0, Some(value & (1 << 31) != 0)), // operand is 0, C flag is bit 31 of register
-                ShiftType::Asr => (((value as i32) >> 31) as u32, Some(value & (1 << 31) != 0)), // all operand bit and C are copies of bit 31 of register value
-                ShiftType::Ror => {
-                    // Same as ror(value, 1) but bit 31 set to current C
-                    let carry = cpu.registers.carry();
-                    let result = ror(value, 1);
-                    let mask = 1 << 31;
-                    let result = if carry { result | mask } else { result & !mask };
-                    (result, Some(value & 1 != 0))
-                }
+            if shift_amount != 0 {
+                shift(shift_type, value, shift_amount, cpu.registers.carry())
+            } else {
+                (value, None)
             }
         }
         DataProcessingOperand::ImmediateShiftedRegister {
@@ -506,7 +512,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
             shift_type,
         } => {
             let value = cpu.registers[operand_register as usize];
-            let (value, carry) = shift(
+            shift(
                 shift_type,
                 value,
                 // ASR#32 is encoded as ASR#0
@@ -515,8 +521,8 @@ pub fn execute_data_processing<BusType: SystemBus>(
                 } else {
                     shift_amount
                 },
-            );
-            (value, Some(carry))
+                cpu.registers.carry(),
+            )
         }
     };
 
@@ -1051,7 +1057,15 @@ fn try_decode_single_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
     let offset = if immediate_offset {
         OffsetArgument::ImmediateOffset(extract_mask!(opcode, 0xFFFu32))
     } else {
-        todo!()
+        let offset_register = extract_mask!(opcode, 0xFu32) as u8;
+        let shift_type =
+            unsafe { std::mem::transmute::<u8, ShiftType>(extract_mask!(opcode, 0x60u32) as u8) };
+        let shift_amount = extract_mask!(opcode, 0xF80u32) as u8;
+        OffsetArgument::ShiftedOffset {
+            shift_amount,
+            shift_type,
+            offset_register,
+        }
     };
 
     Some(DecodedArmOpcode::SingleDataTransfer {
