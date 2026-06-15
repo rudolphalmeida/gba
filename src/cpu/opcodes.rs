@@ -1001,7 +1001,7 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
         // If target and base register are same then preference the value read
         // rather than the base register update
         && !(target_register == base_register
-            && transfer_type == RegisterTransferType::Load)
+        && transfer_type == RegisterTransferType::Load)
     {
         let offset_value = if transfer_type == RegisterTransferType::Load
             && let OffsetArgument::RegisterOffset(register_idx) = offset
@@ -1098,11 +1098,11 @@ pub fn execute_single_data_transfer<BusType: SystemBus>(
     let target_register = target_register as usize;
 
     let base_address = cpu.registers[base_register];
+    let mut address = base_address;
+    let offset_before_load = offset.value(&cpu.registers);
 
     cpu.registers.get_and_incr_pc(4);
 
-    let mut address = base_address;
-    let offset_before_load = offset.value(&cpu.registers);
     if pre_increment {
         if increment {
             address = address.wrapping_add(offset_before_load);
@@ -1143,11 +1143,19 @@ pub fn execute_single_data_transfer<BusType: SystemBus>(
         // If target and base register are same then preference the value read
         // rather than the base register update
         && !(target_register == base_register
-            && transfer_type == RegisterTransferType::Load)
+        && transfer_type == RegisterTransferType::Load)
     {
         let offset_value = if transfer_type == RegisterTransferType::Load
             && let OffsetArgument::RegisterOffset(register_idx) = offset
             && register_idx as usize == target_register
+        {
+            offset_before_load
+        } else if let OffsetArgument::ShiftedOffset {
+            offset_register, ..
+        } = offset
+            && (offset_register as usize == PC_IDX
+                || (transfer_type == RegisterTransferType::Load
+                    && offset_register as usize == target_register))
         {
             offset_before_load
         } else {

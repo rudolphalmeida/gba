@@ -765,7 +765,7 @@ mod tests {
     #[test]
     fn test_arm_opcode_exact_case() {
         let test_state = read_test_data("arm_ldr_str_register_offset");
-        let exact_opcode = 130592367;
+        let exact_opcode = 125535176;
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
 
