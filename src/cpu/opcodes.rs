@@ -17,6 +17,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_swi,
         try_decode_half_word_signed_transfer,
         try_decode_single_data_transfer,
+        try_decode_psr_transfer,
     ];
 
     for decoder in decoders {
@@ -193,6 +194,19 @@ pub enum DataTransferSize {
     DoubleWord,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PsrTransferOperand {
+    Register(u8), // Can be 'source' or destination
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PsrTransferOpcode {
+    /// Transfer PSR contents to a register
+    Mrs,
+    /// Transfer register or immediate to PSR
+    Msr,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum DecodedArmOpcode {
     B {
@@ -258,6 +272,12 @@ pub enum DecodedArmOpcode {
     },
     Swi {
         comment: u32, // Only low 24 bits are valid
+    },
+
+    PsrTransfer {
+        sub_opcode: PsrTransferOpcode,
+        operand: PsrTransferOperand,
+        transfer_spsr: bool, // False implies CPSR
     },
 }
 
@@ -1249,4 +1269,43 @@ pub fn execute_swi<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType) {
     cpu.registers.cpsr |= CondFlag::IrqDisable as u32;
     cpu.registers.user_bank[PC_IDX] = 0x00000008;
     cpu.reload_pipeline(bus);
+}
+
+fn try_decode_psr_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
+    if opcode & 0x0FBF0FFF == 0x010F0000 {
+        let sub_opcode = PsrTransferOpcode::Mrs;
+        let transfer_spsr = test_bit!(opcode, 22);
+        let register = extract_mask!(opcode, 0xF000u32) as u8;
+
+        return Some(DecodedArmOpcode::PsrTransfer {
+            sub_opcode,
+            transfer_spsr,
+            operand: PsrTransferOperand::Register(register),
+        });
+    }
+
+    None
+}
+
+pub fn execute_psr_transfer<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    sub_opcode: PsrTransferOpcode,
+    operand: PsrTransferOperand,
+    transfer_spsr: bool,
+) {
+    match sub_opcode {
+        PsrTransferOpcode::Mrs if let PsrTransferOperand::Register(register) = operand => {
+            let value = if transfer_spsr {
+                cpu.registers.spsr_moded()
+            } else {
+                cpu.registers.cpsr
+            };
+            cpu.registers[register as usize] = value;
+            cpu.registers.get_and_incr_pc(4);
+        }
+        PsrTransferOpcode::Msr => {}
+        _ => panic!("Impossible sub opcode"),
+    }
+    cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
 }

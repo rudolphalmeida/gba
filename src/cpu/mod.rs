@@ -1,8 +1,8 @@
 use crate::cpu::opcodes::{
     check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_single_data_transfer,
-    execute_swi, execute_swp, Condition,
-    DecodedArmOpcode, Opcode,
+    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_psr_transfer,
+    execute_single_data_transfer, execute_swi, execute_swp,
+    Condition, DecodedArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
@@ -218,6 +218,11 @@ impl Arm7Cpu {
                 word,
             } => execute_swp(self, bus, base_register, src_register, dest_register, word),
             DecodedArmOpcode::Swi { .. } => execute_swi(self, bus),
+            DecodedArmOpcode::PsrTransfer {
+                transfer_spsr,
+                operand,
+                sub_opcode,
+            } => execute_psr_transfer(self, bus, sub_opcode, operand, transfer_spsr),
         }
     }
 }
@@ -728,6 +733,7 @@ mod tests {
     #[test_case("arm_ldrsb_ldrsh")]
     #[test_case("arm_ldr_str_immediate_offset")]
     #[test_case("arm_ldr_str_register_offset")]
+    #[test_case("arm_mrs")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
