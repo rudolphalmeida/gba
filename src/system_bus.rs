@@ -43,23 +43,31 @@ impl Bus {
             log::info!("Disabled BIOS");
         }
     }
-}
 
-impl SystemBus for Bus {
-    fn idle(&mut self) {}
+    fn read_at_memory<const N: usize>(&mut self, address: u32, _access: u8) -> [u8; N] {
+        let mut bytes = [0x00; N];
 
-    fn read_word(&mut self, mut address: u32, _access: u8) -> u32 {
-        address &= !3;
         match address {
             0x00000000..0x00004000 if self.bios_active => {
                 let address = address as usize;
-                u32::from_le_bytes(self.bios[address..address + 4].try_into().unwrap())
+                // self.bios[address..address + 4].iter()
+                bytes[..=3].copy_from_slice(&self.bios[address..address + N]);
             }
             _ => todo!(
                 "Unimplemented memory map region for read_word: {:#010X}",
                 address
             ),
         }
+
+        bytes
+    }
+}
+
+impl SystemBus for Bus {
+    fn idle(&mut self) {}
+
+    fn read_word(&mut self, address: u32, access: u8) -> u32 {
+        u32::from_le_bytes(self.read_at_memory::<4>(address & !3, access))
     }
 
     fn write_word(&mut self, address: u32, data: u32, _access: u8) {
@@ -67,8 +75,7 @@ impl SystemBus for Bus {
     }
 
     fn read_half_word(&mut self, address: u32, access: u8) -> u16 {
-        // address &= !1;
-        todo!()
+        u16::from_le_bytes(self.read_at_memory::<2>(address & !1, access))
     }
 
     fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
@@ -76,7 +83,7 @@ impl SystemBus for Bus {
     }
 
     fn read_byte(&mut self, address: u32, access: u8) -> u8 {
-        todo!()
+        self.read_at_memory::<1>(address, access)[0]
     }
 
     fn write_byte(&mut self, address: u32, data: u8, access: u8) {
