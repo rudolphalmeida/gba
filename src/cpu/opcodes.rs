@@ -197,6 +197,7 @@ pub enum DataTransferSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PsrTransferOperand {
     Register(u8), // Can be 'source' or destination
+    Immediate { imm: u8, rotate_by: u8 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -204,7 +205,7 @@ pub enum PsrTransferOpcode {
     /// Transfer PSR contents to a register
     Mrs,
     /// Transfer register or immediate to PSR
-    Msr,
+    Msr(u8),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -593,7 +594,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
     if rd as usize == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
-            cpu.registers.cpsr = cpu.registers.spsr_moded();
+            cpu.registers.cpsr = *cpu.registers.spsr_moded();
         }
         if sub_opcode != DataProcessingOpcode::TST
             && sub_opcode != DataProcessingOpcode::TEQ
@@ -853,7 +854,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
         }
 
         if pc_in_rlist && psr_n_force_user {
-            cpu.registers.cpsr = cpu.registers.spsr_moded();
+            cpu.registers.cpsr = *cpu.registers.spsr_moded();
         }
     }
 
@@ -1284,6 +1285,27 @@ fn try_decode_psr_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
         });
     }
 
+    if opcode & 0x0D90F000 == 0x0100F000 {
+        let write_to = extract_mask!(opcode, 0xF0000u32) as u8;
+        let sub_opcode = PsrTransferOpcode::Msr(write_to);
+        let transfer_spsr = test_bit!(opcode, 22);
+
+        let operand = if test_bit!(opcode, 25) {
+            let imm = extract_mask!(opcode, 0xFFu32) as u8;
+            let rotate_by = extract_mask!(opcode, 0xF00u32) as u8;
+            PsrTransferOperand::Immediate { imm, rotate_by }
+        } else {
+            let register = extract_mask!(opcode, 0xFu32) as u8;
+            PsrTransferOperand::Register(register)
+        };
+
+        return Some(DecodedArmOpcode::PsrTransfer {
+            sub_opcode,
+            transfer_spsr,
+            operand,
+        });
+    }
+
     None
 }
 
@@ -1297,14 +1319,54 @@ pub fn execute_psr_transfer<BusType: SystemBus>(
     match sub_opcode {
         PsrTransferOpcode::Mrs if let PsrTransferOperand::Register(register) = operand => {
             let value = if transfer_spsr {
-                cpu.registers.spsr_moded()
+                *cpu.registers.spsr_moded()
             } else {
                 cpu.registers.cpsr
             };
             cpu.registers[register as usize] = value;
             cpu.registers.get_and_incr_pc(4);
         }
-        PsrTransferOpcode::Msr => {}
+        PsrTransferOpcode::Msr(write_to)
+            if let PsrTransferOperand::Register(register) = operand =>
+        {
+            let mut value = cpu.registers[register as usize];
+            let mut mask = 0x00;
+            if test_bit!(write_to, 3) {
+                mask |= 0xFF000000;
+            }
+            if test_bit!(write_to, 2) {
+                mask |= 0xFF0000;
+            }
+            if test_bit!(write_to, 1) {
+                mask |= 0xFF00;
+            }
+            if test_bit!(write_to, 0) {
+                mask |= 0xFF;
+            }
+
+            if !transfer_spsr {
+                if cpu.registers.mode() == CpuMode::User {
+                    mask &= 0xFF000000;
+                }
+                if mask & 0xFF != 0x00 {
+                    value |= 0x10;
+                }
+                cpu.registers.cpsr = (!mask & cpu.registers.cpsr) | (value & mask);
+            } else {
+                if cpu.registers.mode() != CpuMode::User && cpu.registers.mode() != CpuMode::System
+                {
+                    let spsr = cpu.registers.spsr_moded();
+                    *spsr = (!mask & *spsr) | (value & mask);
+                }
+            }
+
+            cpu.registers.get_and_incr_pc(4);
+        }
+        PsrTransferOpcode::Msr(write_to)
+            if let PsrTransferOperand::Immediate { imm, rotate_by } = operand =>
+        {
+            todo!()
+        }
         _ => panic!("Impossible sub opcode"),
     }
     cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
