@@ -1,7 +1,7 @@
 use super::registers::CondFlag;
-use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ};
+use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
+use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
 use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
@@ -594,7 +594,7 @@ pub fn execute_data_processing<BusType: SystemBus>(
     if rd as usize == PC_IDX {
         if set_flags {
             // TODO: Should not be used in user mode. (What if it is?)
-            cpu.registers.cpsr = *cpu.registers.spsr_moded();
+            cpu.registers.cpsr = *cpu.registers.current_mode_spsr();
         }
         if sub_opcode != DataProcessingOpcode::TST
             && sub_opcode != DataProcessingOpcode::TEQ
@@ -854,7 +854,7 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
         }
 
         if pc_in_rlist && psr_n_force_user {
-            cpu.registers.cpsr = *cpu.registers.spsr_moded();
+            cpu.registers.cpsr = *cpu.registers.current_mode_spsr();
         }
     }
 
@@ -1319,7 +1319,7 @@ pub fn execute_psr_transfer<BusType: SystemBus>(
     match sub_opcode {
         PsrTransferOpcode::Mrs if let PsrTransferOperand::Register(register) = operand => {
             let value = if transfer_spsr {
-                *cpu.registers.spsr_moded()
+                *cpu.registers.current_mode_spsr()
             } else {
                 cpu.registers.cpsr
             };
@@ -1355,7 +1355,7 @@ pub fn execute_psr_transfer<BusType: SystemBus>(
             } else {
                 if cpu.registers.mode() != CpuMode::User && cpu.registers.mode() != CpuMode::System
                 {
-                    let spsr = cpu.registers.spsr_moded();
+                    let spsr = cpu.registers.current_mode_spsr();
                     *spsr = (!mask & *spsr) | (value & mask);
                 }
             }
@@ -1365,7 +1365,7 @@ pub fn execute_psr_transfer<BusType: SystemBus>(
         PsrTransferOpcode::Msr(write_to)
             if let PsrTransferOperand::Immediate { imm, rotate_by } = operand =>
         {
-            todo!()
+            cpu.registers.get_and_incr_pc(4);
         }
         _ => panic!("Impossible sub opcode"),
     }

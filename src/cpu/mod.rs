@@ -735,6 +735,7 @@ mod tests {
     #[test_case("arm_ldr_str_register_offset")]
     #[test_case("arm_mrs")]
     #[test_case("arm_msr_reg")]
+    #[test_case("arm_msr_imm")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 

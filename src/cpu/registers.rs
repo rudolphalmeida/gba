@@ -132,7 +132,7 @@ impl RegisterFile {
 
     /// Returns the SPSR based off the current `mode()`. Returns CPSR when in
     /// `User` or `System` mode.
-    pub fn spsr_moded(&mut self) -> &mut u32 {
+    pub fn current_mode_spsr(&mut self) -> &mut u32 {
         match self.mode() {
             CpuMode::User => &mut self.cpsr,
             CpuMode::Fiq => &mut self.spsr_fiq,
