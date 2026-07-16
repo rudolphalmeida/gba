@@ -1,7 +1,7 @@
 use super::registers::CondFlag;
+use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
-use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
-use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
+use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ};
 use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
@@ -1329,45 +1329,49 @@ pub fn execute_psr_transfer<BusType: SystemBus>(
         PsrTransferOpcode::Msr(write_to)
             if let PsrTransferOperand::Register(register) = operand =>
         {
-            let mut value = cpu.registers[register as usize];
-            let mut mask = 0x00;
-            if test_bit!(write_to, 3) {
-                mask |= 0xFF000000;
-            }
-            if test_bit!(write_to, 2) {
-                mask |= 0xFF0000;
-            }
-            if test_bit!(write_to, 1) {
-                mask |= 0xFF00;
-            }
-            if test_bit!(write_to, 0) {
-                mask |= 0xFF;
-            }
-
-            if !transfer_spsr {
-                if cpu.registers.mode() == CpuMode::User {
-                    mask &= 0xFF000000;
-                }
-                if mask & 0xFF != 0x00 {
-                    value |= 0x10;
-                }
-                cpu.registers.cpsr = (!mask & cpu.registers.cpsr) | (value & mask);
-            } else {
-                if cpu.registers.mode() != CpuMode::User && cpu.registers.mode() != CpuMode::System
-                {
-                    let spsr = cpu.registers.current_mode_spsr();
-                    *spsr = (!mask & *spsr) | (value & mask);
-                }
-            }
-
+            let value = cpu.registers[register as usize];
+            transfer_psr(cpu, transfer_spsr, write_to, value);
             cpu.registers.get_and_incr_pc(4);
         }
         PsrTransferOpcode::Msr(write_to)
             if let PsrTransferOperand::Immediate { imm, rotate_by } = operand =>
         {
+            let value = ror(imm as u32, rotate_by as u32 * 2);
+            transfer_psr(cpu, transfer_spsr, write_to, value);
             cpu.registers.get_and_incr_pc(4);
         }
         _ => panic!("Impossible sub opcode"),
     }
     cpu.next_access = ACCESS_CODE | ACCESS_SEQ;
+}
+
+fn transfer_psr(cpu: &mut Arm7Cpu, transfer_spsr: bool, write_to: u8, mut value: u32) {
+    let mut mask = 0x00;
+    if test_bit!(write_to, 3) {
+        mask |= 0xFF000000;
+    }
+    if test_bit!(write_to, 2) {
+        mask |= 0xFF0000;
+    }
+    if test_bit!(write_to, 1) {
+        mask |= 0xFF00;
+    }
+    if test_bit!(write_to, 0) {
+        mask |= 0xFF;
+    }
+
+    if !transfer_spsr {
+        if cpu.registers.mode() == CpuMode::User {
+            mask &= 0xFF000000;
+        }
+        if mask & 0xFF != 0x00 {
+            value |= 0x10;
+        }
+        cpu.registers.cpsr = (!mask & cpu.registers.cpsr) | (value & mask);
+    } else {
+        if cpu.registers.mode() != CpuMode::User && cpu.registers.mode() != CpuMode::System {
+            let spsr = cpu.registers.current_mode_spsr();
+            *spsr = (!mask & *spsr) | (value & mask);
+        }
+    }
 }
