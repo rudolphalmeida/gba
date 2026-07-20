@@ -1,8 +1,8 @@
 use crate::cpu::opcodes::{
     check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_psr_transfer,
-    execute_single_data_transfer, execute_swi, execute_swp,
-    Condition, DecodedArmOpcode, Opcode,
+    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_multiply_accumulate,
+    execute_psr_transfer, execute_single_data_transfer, execute_swi,
+    execute_swp, Condition, DecodedArmOpcode, Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
@@ -223,6 +223,21 @@ impl Arm7Cpu {
                 operand,
                 sub_opcode,
             } => execute_psr_transfer(self, bus, sub_opcode, operand, transfer_spsr),
+            DecodedArmOpcode::MultiplyAccumulate {
+                dest_register,
+                operand_register_rm,
+                operand_register_rs,
+                acc_register,
+                set_condition_codes,
+            } => execute_multiply_accumulate(
+                self,
+                bus,
+                dest_register,
+                operand_register_rs,
+                operand_register_rm,
+                acc_register,
+                set_condition_codes,
+            ),
         }
     }
 }
@@ -247,6 +262,7 @@ mod tests {
     use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
     use crate::system_bus::{SystemBus, ACCESS_CODE};
+    use crate::test_bit;
     use circular_buffer::CircularBuffer;
     use serde::{Deserialize, Serialize};
     use serde_json;
@@ -736,6 +752,7 @@ mod tests {
     #[test_case("arm_mrs")]
     #[test_case("arm_msr_reg")]
     #[test_case("arm_msr_imm")]
+    #[test_case("arm_mul_mla")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -750,6 +767,15 @@ mod tests {
             let mut cpu = cpu_with_state(&test_case.initial);
 
             cpu.execute_next_arm(&mut bus);
+
+            // Ignore carry flag differences for MUL/MLA as carry is "unpredictable"
+            // Actual horror: https://bmchtech.github.io/post/multiply/
+            if name == "arm_mul_mla"
+                && test_bit!(cpu.registers.cpsr, 29) != test_bit!(test_case.r#final.cpsr, 29)
+            {
+                cpu.registers.cpsr ^= 1 << 29;
+            }
+
             compare_cpu_with_state(
                 test_case.opcode,
                 &cpu,

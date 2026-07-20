@@ -18,6 +18,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_half_word_signed_transfer,
         try_decode_single_data_transfer,
         try_decode_psr_transfer,
+        try_decode_multiply_accumulate,
     ];
 
     for decoder in decoders {
@@ -279,6 +280,15 @@ pub enum DecodedArmOpcode {
         sub_opcode: PsrTransferOpcode,
         operand: PsrTransferOperand,
         transfer_spsr: bool, // False implies CPSR
+    },
+
+    // Multiplication
+    MultiplyAccumulate {
+        set_condition_codes: bool,
+        dest_register: u8,
+        acc_register: Option<u8>, // Presence implies MLA else MUL
+        operand_register_rs: u8,
+        operand_register_rm: u8,
     },
 }
 
@@ -1373,5 +1383,69 @@ fn transfer_psr(cpu: &mut Arm7Cpu, transfer_spsr: bool, write_to: u8, mut value:
             let spsr = cpu.registers.current_mode_spsr();
             *spsr = (!mask & *spsr) | (value & mask);
         }
+    }
+}
+
+fn try_decode_multiply_accumulate(opcode: u32) -> Option<DecodedArmOpcode> {
+    if opcode & 0x0FC0000F0 == 0x00000090 {
+        let set_condition_codes = test_bit!(opcode, 20);
+        let dest_register = extract_mask!(opcode, 0xF0000u32) as u8;
+        let acc_register = extract_mask!(opcode, 0xF000u32) as u8;
+        let operand_register_rs = extract_mask!(opcode, 0xF00u32) as u8;
+        let operand_register_rm = extract_mask!(opcode, 0xFu32) as u8;
+
+        let sub_opcode = extract_mask!(opcode, 0xF00000u32);
+        let acc_register = if test_bit!(opcode, 21) {
+            Some(acc_register)
+        } else {
+            None
+        };
+
+        Some(DecodedArmOpcode::MultiplyAccumulate {
+            set_condition_codes,
+            operand_register_rm,
+            operand_register_rs,
+            acc_register,
+            dest_register,
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) fn execute_multiply_accumulate<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    dest_register: u8,
+    operand_register_rs: u8,
+    operand_register_rm: u8,
+    acc_register: Option<u8>,
+    set_condition_codes: bool,
+) {
+    cpu.registers.get_and_incr_pc(4);
+
+    let operand_rs = cpu.registers[operand_register_rs as usize];
+    let operand_rm = cpu.registers[operand_register_rm as usize];
+
+    let (result, carry) = operand_rm.overflowing_mul(operand_rs);
+    let (result, carry) = if let Some(operand_register_acc) = acc_register {
+        result.overflowing_add(cpu.registers[operand_register_acc as usize])
+    } else {
+        (result, carry)
+    };
+
+    cpu.registers[dest_register as usize] = result;
+
+    if set_condition_codes {
+        cpu.registers.update_flag(CondFlag::Zero, result == 0x0);
+        cpu.registers
+            .update_flag(CondFlag::Sign, test_bit!(result, 31));
+        cpu.registers.update_flag(CondFlag::Carry, carry);
+    }
+
+    if dest_register as usize == PC_IDX {
+        cpu.reload_pipeline(bus);
+    } else {
+        cpu.next_access = ACCESS_CODE;
     }
 }
