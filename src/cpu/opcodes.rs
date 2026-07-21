@@ -1387,7 +1387,7 @@ fn transfer_psr(cpu: &mut Arm7Cpu, transfer_spsr: bool, write_to: u8, mut value:
 }
 
 fn try_decode_multiply_accumulate(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0FC0000F0 == 0x00000090 {
+    if opcode & 0x0FC000F0 == 0x00000090 {
         let set_condition_codes = test_bit!(opcode, 20);
         let dest_register = extract_mask!(opcode, 0xF0000u32) as u8;
         let acc_register = extract_mask!(opcode, 0xF000u32) as u8;
