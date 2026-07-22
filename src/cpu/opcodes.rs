@@ -19,6 +19,7 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
         try_decode_single_data_transfer,
         try_decode_psr_transfer,
         try_decode_multiply_accumulate,
+        try_decode_long_multiply_accumulate,
     ];
 
     for decoder in decoders {
@@ -289,6 +290,16 @@ pub enum DecodedArmOpcode {
         acc_register: Option<u8>, // Presence implies MLA else MUL
         operand_register_rs: u8,
         operand_register_rm: u8,
+    },
+
+    LongMultiplyAccumulate {
+        set_condition_codes: bool,
+        dest_register_hi: u8,
+        dest_register_lo: u8,
+        operand_register_rs: u8,
+        operand_register_rm: u8,
+        signed: bool,
+        accumulate: bool,
     },
 }
 
@@ -1440,10 +1451,92 @@ pub(crate) fn execute_multiply_accumulate<BusType: SystemBus>(
         cpu.registers.update_flag(CondFlag::Zero, result == 0x0);
         cpu.registers
             .update_flag(CondFlag::Sign, test_bit!(result, 31));
+        // This is not the right carry! But DON'T CARE
+        // https://bmchtech.github.io/post/multiply/
         cpu.registers.update_flag(CondFlag::Carry, carry);
     }
 
     if dest_register as usize == PC_IDX {
+        cpu.reload_pipeline(bus);
+    } else {
+        cpu.next_access = ACCESS_CODE;
+    }
+}
+
+fn try_decode_long_multiply_accumulate(opcode: u32) -> Option<DecodedArmOpcode> {
+    if opcode & 0x0F8000F0 == 0x00800090 {
+        let signed = test_bit!(opcode, 22);
+        let accumulate = test_bit!(opcode, 21);
+        let set_condition_codes = test_bit!(opcode, 20);
+        let dest_register_hi = extract_mask!(opcode, 0xF0000u32) as u8;
+        let dest_register_lo = extract_mask!(opcode, 0xF000u32) as u8;
+        let operand_register_rs = extract_mask!(opcode, 0xF00u32) as u8;
+        let operand_register_rm = extract_mask!(opcode, 0xFu32) as u8;
+
+        Some(DecodedArmOpcode::LongMultiplyAccumulate {
+            set_condition_codes,
+            operand_register_rm,
+            operand_register_rs,
+            dest_register_lo,
+            dest_register_hi,
+            signed,
+            accumulate,
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) fn execute_long_multiply_accumulate<BusType: SystemBus>(
+    cpu: &mut Arm7Cpu,
+    bus: &mut BusType,
+    dest_register_hi: u8,
+    dest_register_lo: u8,
+    operand_register_rs: u8,
+    operand_register_rm: u8,
+    set_condition_codes: bool,
+    accumulate: bool,
+    signed: bool,
+) {
+    cpu.registers.get_and_incr_pc(4);
+
+    let operand_rs = cpu.registers[operand_register_rs as usize];
+    let operand_rs = if signed {
+        operand_rs as i32 as u64
+    } else {
+        operand_rs as u64
+    };
+    let operand_rm = cpu.registers[operand_register_rm as usize];
+    let operand_rm = if signed {
+        operand_rm as i32 as u64
+    } else {
+        operand_rm as u64
+    };
+
+    let (result, carry) = operand_rm.overflowing_mul(operand_rs);
+
+    let (result, carry) = if accumulate {
+        let operand_hi = (cpu.registers[dest_register_hi as usize] as u64) << 32;
+        let operand_lo = cpu.registers[dest_register_lo as usize] as u64;
+        let operand = operand_hi | operand_lo;
+        result.overflowing_add(operand)
+    } else {
+        (result, carry)
+    };
+
+    cpu.registers[dest_register_lo as usize] = result as u32;
+    cpu.registers[dest_register_hi as usize] = (result >> 32) as u32;
+
+    if set_condition_codes {
+        cpu.registers.update_flag(CondFlag::Zero, result == 0x0);
+        cpu.registers
+            .update_flag(CondFlag::Sign, test_bit!(result, 63));
+        // This is not the right carry! But DON'T CARE
+        // https://bmchtech.github.io/post/multiply/
+        cpu.registers.update_flag(CondFlag::Carry, carry);
+    }
+
+    if dest_register_hi as usize == PC_IDX || dest_register_lo as usize == PC_IDX {
         cpu.reload_pipeline(bus);
     } else {
         cpu.next_access = ACCESS_CODE;

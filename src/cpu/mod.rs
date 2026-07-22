@@ -1,8 +1,9 @@
 use crate::cpu::opcodes::{
     check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_multiply_accumulate,
-    execute_psr_transfer, execute_single_data_transfer, execute_swi,
-    execute_swp, Condition, DecodedArmOpcode, Opcode,
+    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_long_multiply_accumulate,
+    execute_multiply_accumulate, execute_psr_transfer, execute_single_data_transfer,
+    execute_swi, execute_swp, Condition, DecodedArmOpcode,
+    Opcode,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
 use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
@@ -237,6 +238,25 @@ impl Arm7Cpu {
                 operand_register_rm,
                 acc_register,
                 set_condition_codes,
+            ),
+            DecodedArmOpcode::LongMultiplyAccumulate {
+                dest_register_hi,
+                dest_register_lo,
+                set_condition_codes,
+                signed,
+                accumulate,
+                operand_register_rm,
+                operand_register_rs,
+            } => execute_long_multiply_accumulate(
+                self,
+                bus,
+                dest_register_hi,
+                dest_register_lo,
+                operand_register_rs,
+                operand_register_rm,
+                set_condition_codes,
+                accumulate,
+                signed,
             ),
         }
     }
@@ -753,6 +773,7 @@ mod tests {
     #[test_case("arm_msr_reg")]
     #[test_case("arm_msr_imm")]
     #[test_case("arm_mul_mla")]
+    #[test_case("arm_mull_mlal")]
     fn test_arm_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
@@ -770,7 +791,7 @@ mod tests {
 
             // Ignore carry flag differences for MUL/MLA as carry is "unpredictable"
             // Actual horror: https://bmchtech.github.io/post/multiply/
-            if name == "arm_mul_mla"
+            if (name == "arm_mul_mla" || name == "arm_mull_mlal")
                 && test_bit!(cpu.registers.cpsr, 29) != test_bit!(test_case.r#final.cpsr, 29)
             {
                 cpu.registers.cpsr ^= 1 << 29;
@@ -816,7 +837,7 @@ mod tests {
 
             // Ignore carry flag differences for MUL/MLA as carry is "unpredictable"
             // Actual horror: https://bmchtech.github.io/post/multiply/
-            if name == "arm_mul_mla"
+            if (name == "arm_mul_mla" || name == "arm_mull_mlal")
                 && test_bit!(cpu.registers.cpsr, 29) != test_bit!(test_case.r#final.cpsr, 29)
             {
                 cpu.registers.cpsr ^= 1 << 29;
