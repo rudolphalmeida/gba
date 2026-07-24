@@ -1,9 +1,70 @@
 use super::registers::CondFlag;
-use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, LINK_IDX, PC_IDX};
 use crate::cpu::Arm7Cpu;
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ};
+use crate::cpu::registers::{CpuMode, CpuState, LINK_IDX, PC_IDX, RegisterFile};
+use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, SystemBus};
 use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
+
+/*
+
+ARM7TDMI - ARM instructions
+
+ 2         0
+ 765'43210 7654  Instructions/groups
+ ------------------------------------------------------------
+ 000'000.. 1001  MUL, MLA
+ 000'01... 1001  MULL, MLAL
+ 000'10.00 1001  SWP
+ 000'..... 1011  LDRH, STRH
+ 000'....1 11.1  LDRSB, LDRSH
+ 000'10.00 0000  MRS
+ 000'10.10 0000  MSR (register)
+ 001'10.10 ....  MSR (immediate)
+ 000'10010 0001  BX
+ 000'..... ...0  Data Processing (immediate shift)
+ 000'..... 0..1  Data Processing (register shift)
+ 001'10.00 ....  Undefined instructions in Data Processing
+ 001'..... ....  Data Processing (immediate value)
+ 010'..... ....  LDR, STR (immediate offset)
+ 011'..... ...0  LDR, STR (register offset)
+ 100'..... ....  LDM, STM
+ 101'..... ....  B, BL
+ 110'..... ....  STC, LDC
+ 111'0.... ...0  CDP
+ 111'0.... ...1  MCR, MRC
+ 111'1.... ....  SWI
+
+ ARM7TDMI - Thumb instructions
+
+ 1      0
+ 5432109876  Instructions/groups
+ ------------------------------------------------------------
+ 00011.....  ADD, SUB
+ 000.......  LSL, LSR, ASR, ROR
+ 001.......  MOV, CMP, ADD, SUB
+ 010000....  Data Processing
+ 01000111..  BX
+ 010001....  ADD, CMP, MOV (high registers)
+ 01001.....  LDR          (PC-relative)
+ 0101.01...  LDRH, STRH   (register offset)
+ 0101.11...  LDRSH, LDRSB (register offset)
+ 0101.00...  LDR, STR     (register offset)
+ 0101.10...  LDRB, STRB   (register offset)
+ 0110......  LDR, STR     (immediate offset)
+ 0111......  LDRB, STRB   (immediate offset)
+ 1000......  LDRH, STRH   (immediate offset)
+ 1001......  LDR, STR     (SP-relative)
+ 1010......  ADD (SP or PC) aka Load Address
+ 10110000..  ADD, SUB (SP)
+ 1011.10...  PUSH, POP
+ 1100......  LDM, STM
+ 11011111..  SWI
+ 11011110..  Undefined instructions in Bcc range
+ 1101......  Bcc (conditional branching)
+ 11100.....  B (unconditional branching)
+ 11110.....  BL, BLX prefix
+ 11111.....  BL suffix
+ */
 
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     // TODO: This is possibly a slow decoding scheme. Try a LUT?
@@ -31,6 +92,10 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     None
 }
 
+pub fn decode_thumb_opcode(opcode: u16) -> Option<Opcode> {
+    None
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum Condition {
@@ -52,12 +117,12 @@ pub enum Condition {
     Never = 0xF,
 }
 
-pub fn condition_from_opcode(opcode: u32) -> Condition {
+pub fn condition_from_arm_opcode(opcode: u32) -> Condition {
     unsafe { std::mem::transmute::<u8, Condition>((opcode >> 28) as u8) }
 }
 
 pub fn check_condition(registers: &RegisterFile, opcode: u32) -> bool {
-    let condition = condition_from_opcode(opcode);
+    let condition = condition_from_arm_opcode(opcode);
 
     let zero = registers.zero();
     let carry = registers.carry();
@@ -304,9 +369,12 @@ pub enum DecodedArmOpcode {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum DecodedThumbOpcode {}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Opcode {
     Arm(DecodedArmOpcode),
-    Thumb,
+    Thumb(DecodedThumbOpcode),
 }
 
 // B, BL

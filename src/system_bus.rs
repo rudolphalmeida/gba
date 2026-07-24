@@ -44,7 +44,7 @@ impl Bus {
         }
     }
 
-    fn read_at_memory<const N: usize>(&mut self, address: u32, _access: u8) -> [u8; N] {
+    fn read_at<const N: usize>(&mut self, address: u32, _access: u8) -> [u8; N] {
         let mut bytes = [0x00; N];
 
         match address {
@@ -67,7 +67,7 @@ impl SystemBus for Bus {
     fn idle(&mut self) {}
 
     fn read_word(&mut self, address: u32, access: u8) -> u32 {
-        u32::from_le_bytes(self.read_at_memory::<4>(address & !3, access))
+        u32::from_le_bytes(self.read_at::<4>(address & !3, access))
     }
 
     fn write_word(&mut self, address: u32, data: u32, _access: u8) {
@@ -75,7 +75,7 @@ impl SystemBus for Bus {
     }
 
     fn read_half_word(&mut self, address: u32, access: u8) -> u16 {
-        u16::from_le_bytes(self.read_at_memory::<2>(address & !1, access))
+        u16::from_le_bytes(self.read_at::<2>(address & !1, access))
     }
 
     fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
@@ -83,7 +83,7 @@ impl SystemBus for Bus {
     }
 
     fn read_byte(&mut self, address: u32, access: u8) -> u8 {
-        self.read_at_memory::<1>(address, access)[0]
+        self.read_at::<1>(address, access)[0]
     }
 
     fn write_byte(&mut self, address: u32, data: u8, access: u8) {

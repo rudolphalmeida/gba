@@ -1,12 +1,13 @@
 use crate::cpu::opcodes::{
-    check_condition, condition_from_opcode, decode_arm_opcode, execute_arm_to_thumb_bx, execute_b, execute_bl,
-    execute_block_data_transfer, execute_data_processing, execute_half_word_signed_transfer, execute_long_multiply_accumulate,
-    execute_multiply_accumulate, execute_psr_transfer, execute_single_data_transfer,
-    execute_swi, execute_swp, Condition, DecodedArmOpcode,
-    Opcode,
+    Condition, DecodedArmOpcode, DecodedThumbOpcode, Opcode, check_condition,
+    condition_from_arm_opcode, decode_arm_opcode, decode_thumb_opcode, execute_arm_to_thumb_bx,
+    execute_b, execute_bl, execute_block_data_transfer, execute_data_processing,
+    execute_half_word_signed_transfer, execute_long_multiply_accumulate,
+    execute_multiply_accumulate, execute_psr_transfer, execute_single_data_transfer, execute_swi,
+    execute_swp,
 };
 use crate::cpu::registers::{CondFlag, CpuMode, CpuState, PC_IDX};
-use crate::system_bus::{SystemBus, ACCESS_CODE, ACCESS_SEQ};
+use crate::system_bus::{ACCESS_CODE, ACCESS_SEQ, SystemBus};
 use circular_buffer::CircularBuffer;
 use registers::RegisterFile;
 use std::ops::BitAnd;
@@ -91,13 +92,13 @@ impl Arm7Cpu {
     pub fn step<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         match self.registers.state() {
             CpuState::Arm => self.execute_next_arm(bus),
-            CpuState::Thumb => todo!(),
+            CpuState::Thumb => self.execute_next_thumb(bus),
         }
     }
 
     fn execute_next_arm<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let execute_opcode = self.pipeline[0];
-        self.registers[PC_IDX] &= !1;
+        self.registers[PC_IDX] &= !3; // Ensure PC is word-aligned
         let execute_address = self.registers[PC_IDX] - 8;
 
         self.pipeline[0] = self.pipeline[1];
@@ -109,7 +110,7 @@ impl Arm7Cpu {
         if let Some(Opcode::Arm(opcode)) = decode_arm_opcode(execute_opcode) {
             let mut execution_log = ExecutedOpcode {
                 opcode: Opcode::Arm(opcode),
-                condition: condition_from_opcode(execute_opcode),
+                condition: condition_from_arm_opcode(execute_opcode),
                 address: execute_address,
                 did_execute: false,
             };
@@ -128,6 +129,35 @@ impl Arm7Cpu {
             self.registers.get_and_incr_pc(4);
             self.opcode_traces
                 .push_back(OpcodeTraceLog::NotDecoded(execute_address, execute_opcode));
+        }
+    }
+
+    fn execute_next_thumb<BusType: SystemBus>(&mut self, bus: &mut BusType) {
+        let execute_opcode = self.pipeline[0] as u16;
+        self.registers[PC_IDX] &= !1; // Ensure PC is half-word aligned
+        let execute_address = self.registers[PC_IDX] - 8;
+
+        self.pipeline[0] = self.pipeline[1];
+        // The corresponding PC increment is implemented in the opcodes. Since this fetch and the
+        // execution happen in parallel and the execution functions need to see the proper PC value
+        // it seems not possible to have a general increment here
+        self.pipeline[1] = bus.read_half_word(self.registers[PC_IDX], self.next_access) as u32;
+
+        if let Some(Opcode::Thumb(opcode)) = decode_thumb_opcode(execute_opcode) {
+            self.execute_thumb_opcode(opcode, bus);
+            self.opcode_traces
+                .push_back(OpcodeTraceLog::Decoded(ExecutedOpcode {
+                    opcode: Opcode::Thumb(opcode),
+                    condition: Condition::Always,
+                    address: execute_address,
+                    did_execute: false,
+                }));
+        } else {
+            self.registers.get_and_incr_pc(4);
+            self.opcode_traces.push_back(OpcodeTraceLog::NotDecoded(
+                execute_address,
+                execute_opcode as u32,
+            ));
         }
     }
 
@@ -260,6 +290,14 @@ impl Arm7Cpu {
             ),
         }
     }
+
+    fn execute_thumb_opcode<BusType: SystemBus>(
+        &mut self,
+        opcode: DecodedThumbOpcode,
+        bus: &mut BusType,
+    ) {
+        match opcode {}
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -279,16 +317,16 @@ pub enum OpcodeTraceLog {
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::registers::{CpuMode, CpuState, RegisterFile, PC_IDX};
     use crate::cpu::Arm7Cpu;
-    use crate::system_bus::{SystemBus, ACCESS_CODE};
+    use crate::cpu::registers::{CpuMode, CpuState, PC_IDX, RegisterFile};
+    use crate::system_bus::{ACCESS_CODE, SystemBus};
     use crate::test_bit;
     use circular_buffer::CircularBuffer;
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::fmt;
     use std::fs::File;
-    use std::io::{stderr, BufReader, Write};
+    use std::io::{BufReader, Write, stderr};
     use test_case::test_case;
 
     #[test]
@@ -774,7 +812,8 @@ mod tests {
     #[test_case("arm_msr_imm")]
     #[test_case("arm_mul_mla")]
     #[test_case("arm_mull_mlal")]
-    fn test_arm_opcode(name: &'static str) {
+    #[test_case("thumb_b")]
+    fn test_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
         let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
@@ -787,53 +826,7 @@ mod tests {
             };
             let mut cpu = cpu_with_state(&test_case.initial);
 
-            cpu.execute_next_arm(&mut bus);
-
-            // Ignore carry flag differences for MUL/MLA as carry is "unpredictable"
-            // Actual horror: https://bmchtech.github.io/post/multiply/
-            if (name == "arm_mul_mla" || name == "arm_mull_mlal")
-                && test_bit!(cpu.registers.cpsr, 29) != test_bit!(test_case.r#final.cpsr, 29)
-            {
-                cpu.registers.cpsr ^= 1 << 29;
-            }
-
-            compare_cpu_with_state(
-                test_case.opcode,
-                &cpu,
-                &test_case.r#final,
-                &mut opcode_failures,
-            );
-        }
-
-        {
-            let mut lock = stderr().lock();
-            if !opcode_failures.is_empty() {
-                opcode_failures.iter().for_each(|(opcode, failure)| {
-                    writeln!(lock, "Opcode {opcode} failed with {failure:?}").unwrap();
-                });
-            }
-        }
-
-        assert_eq!(opcode_failures.len(), 0);
-    }
-
-    #[test]
-    fn test_arm_opcode_exact_case() {
-        let name = "arm_mul_mla";
-        let test_state = read_test_data(name);
-        let exact_opcode = 270293914;
-
-        let mut opcode_failures: Vec<(u32, OpcodeExecFailure)> = vec![];
-
-        for test_case in test_state.iter().filter(|case| case.opcode == exact_opcode) {
-            let mut bus = TransactionSystemBus {
-                test_state: test_case,
-                opcode: test_case.opcode,
-                next_index: 0,
-            };
-            let mut cpu = cpu_with_state(&test_case.initial);
-
-            cpu.execute_next_arm(&mut bus);
+            cpu.step(&mut bus);
 
             // Ignore carry flag differences for MUL/MLA as carry is "unpredictable"
             // Actual horror: https://bmchtech.github.io/post/multiply/

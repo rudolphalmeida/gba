@@ -11,7 +11,7 @@ pub fn opcode_disassembly(ui: &mut egui::Ui, opcode: &Opcode) {
     ui.horizontal(|ui| {
         match opcode {
             Opcode::Arm(decoded_arm_opcode) => format_decoded_arm_opcode(ui, decoded_arm_opcode),
-            Opcode::Thumb => {
+            Opcode::Thumb(_) => {
                 ui.label("Thumb disassembly not implemented".to_string());
             }
         };
