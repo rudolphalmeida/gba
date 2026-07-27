@@ -6,9 +6,7 @@ use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
 /*
-
 ARM7TDMI - ARM instructions
-
  2         0
  765'43210 7654  Instructions/groups
  ------------------------------------------------------------
@@ -33,58 +31,71 @@ ARM7TDMI - ARM instructions
  111'0.... ...0  CDP
  111'0.... ...1  MCR, MRC
  111'1.... ....  SWI
-
- ARM7TDMI - Thumb instructions
-
- 1      0
- 5432109876  Instructions/groups
- ------------------------------------------------------------
- 00011.....  ADD, SUB
- 000.......  LSL, LSR, ASR, ROR
- 001.......  MOV, CMP, ADD, SUB
- 010000....  Data Processing
- 01000111..  BX
- 010001....  ADD, CMP, MOV (high registers)
- 01001.....  LDR          (PC-relative)
- 0101.01...  LDRH, STRH   (register offset)
- 0101.11...  LDRSH, LDRSB (register offset)
- 0101.00...  LDR, STR     (register offset)
- 0101.10...  LDRB, STRB   (register offset)
- 0110......  LDR, STR     (immediate offset)
- 0111......  LDRB, STRB   (immediate offset)
- 1000......  LDRH, STRH   (immediate offset)
- 1001......  LDR, STR     (SP-relative)
- 1010......  ADD (SP or PC) aka Load Address
- 10110000..  ADD, SUB (SP)
- 1011.10...  PUSH, POP
- 1100......  LDM, STM
- 11011111..  SWI
- 11011110..  Undefined instructions in Bcc range
- 1101......  Bcc (conditional branching)
- 11100.....  B (unconditional branching)
- 11110.....  BL, BLX prefix
- 11111.....  BL suffix
  */
-
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
-    // TODO: This is possibly a slow decoding scheme. Try a LUT?
+    let mask = extract_mask!(opcode, 0x0FF00000u32) << 4 | extract_mask!(opcode, 0xF0u32);
 
-    let decoders = [
-        try_decode_b_bl,
-        try_decode_bx,
-        try_decode_data_processing,
-        try_decode_ldm_stm,
-        try_decode_swp,
-        try_decode_swi,
-        try_decode_half_word_signed_transfer,
-        try_decode_single_data_transfer,
-        try_decode_psr_transfer,
-        try_decode_multiply_accumulate,
-        try_decode_long_multiply_accumulate,
-    ];
-
-    for decoder in decoders {
-        if let Some(decoded_opcode) = decoder(opcode) {
+    if mask & 0b111111001111 == 0b1001 {
+        if let Some(decoded_opcode) = try_decode_multiply_accumulate(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111110001111 == 0b10001001 {
+        if let Some(decoded_opcode) = try_decode_long_multiply_accumulate(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111110111111 == 0b100001001 {
+        if let Some(decoded_opcode) = try_decode_swp(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111000001111 == 0b1011 || mask & 0b111000011101 == 0b11101 {
+        if let Some(decoded_opcode) = try_decode_half_word_signed_transfer(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111110111111 == 0b100000000 {
+        if let Some(decoded_opcode) = decode_mrs(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111110111111 == 0b100100000 || mask & 0b111110110000 == 0b1100100000 {
+        if let Some(decoded_opcode) = decode_msr(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111111100001 == 0b100100001 {
+        if let Some(decoded_opcode) = try_decode_bx(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111000000001 == 0b0
+        || mask & 0b111000001001 == 0b1
+        || mask & 0b111110110000 == 0b1100000000
+        || mask & 0b111000000000 == 0b1000000000
+    {
+        if let Some(decoded_opcode) = try_decode_data_processing(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111000000000 == 0b10000000000 || mask & 0b111000000000 == 0b11000000000 {
+        if let Some(decoded_opcode) = try_decode_single_data_transfer(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111000000000 == 0b100000000000 {
+        if let Some(decoded_opcode) = try_decode_ldm_stm(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111000000000 == 0b101000000000 {
+        if let Some(decoded_opcode) = try_decode_b_bl(opcode) {
+            return Some(Opcode::Arm(decoded_opcode));
+        }
+    }
+    if mask & 0b111100000000 == 0b111100000000 {
+        if let Some(decoded_opcode) = try_decode_swi(opcode) {
             return Some(Opcode::Arm(decoded_opcode));
         }
     }
@@ -92,6 +103,39 @@ pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     None
 }
 
+/*
+ARM7TDMI - Thumb instructions
+
+1      0
+5432109876  Instructions/groups
+------------------------------------------------------------
+00011.....  ADD, SUB
+000.......  LSL, LSR, ASR, ROR
+001.......  MOV, CMP, ADD, SUB
+010000....  Data Processing
+01000111..  BX
+010001....  ADD, CMP, MOV (high registers)
+01001.....  LDR          (PC-relative)
+0101.01...  LDRH, STRH   (register offset)
+0101.11...  LDRSH, LDRSB (register offset)
+0101.00...  LDR, STR     (register offset)
+0101.10...  LDRB, STRB   (register offset)
+0110......  LDR, STR     (immediate offset)
+0111......  LDRB, STRB   (immediate offset)
+1000......  LDRH, STRH   (immediate offset)
+1001......  LDR, STR     (SP-relative)
+1010......  ADD (SP or PC) aka Load Address
+10110000..  ADD, SUB (SP)
+1011.10...  PUSH, POP
+1100......  LDM, STM
+11011111..  SWI
+11011110..  Undefined instructions in Bcc range
+1101......  Bcc (conditional branching)
+11100.....  B (unconditional branching)
+11110.....  BL, BLX prefix
+11111.....  BL suffix
+*
+*/
 pub fn decode_thumb_opcode(opcode: u16) -> Option<Opcode> {
     None
 }
@@ -379,10 +423,6 @@ pub enum Opcode {
 
 // B, BL
 fn try_decode_b_bl(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0xE000000 != 0xA000000 {
-        return None;
-    }
-
     if test_bit!(opcode, 24) {
         Some(DecodedArmOpcode::BL {
             offset: opcode & 0xFFFFFF,
@@ -444,10 +484,6 @@ pub fn execute_arm_to_thumb_bx<BusType: SystemBus>(
 
 // Data processing
 fn try_decode_data_processing(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0C000000 != 0 {
-        return None;
-    }
-
     let sub_opcode = extract_mask!(opcode, 0x1E00000u32) as u8;
     let set_flags = test_bit!(opcode, 20);
     // Set condition code flag must be *true* for test and compare opcodes
@@ -820,10 +856,6 @@ fn execute_mvn(cpu: &mut Arm7Cpu, rd: usize, rn: usize, operand: u32) -> (u32, b
 
 // Block Data Transfer (LDM, STM)
 fn try_decode_ldm_stm(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0E000000 != 0x08000000 {
-        return None;
-    }
-
     let pre_increment = opcode & 0x1000000 == 0x1000000;
     let increment = opcode & 0x800000 == 0x800000;
     let psr_n_force_user = opcode & 0x400000 == 0x400000;
@@ -958,10 +990,6 @@ pub fn execute_block_data_transfer<BusType: SystemBus>(
 }
 
 fn try_decode_half_word_signed_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0E000090 != 0x00000090 {
-        return None;
-    }
-
     let pre_increment = test_bit!(opcode, 24); // or decrement
     let increment = test_bit!(opcode, 23);
     let immediate_offset = test_bit!(opcode, 22);
@@ -1139,10 +1167,6 @@ pub fn execute_half_word_signed_transfer<BusType: SystemBus>(
 }
 
 fn try_decode_single_data_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
-    if extract_mask!(opcode, 0x0C000000u32) != 0b01 {
-        return None;
-    }
-
     let immediate_offset = !test_bit!(opcode, 25);
     let pre_increment = test_bit!(opcode, 24);
     let increment = test_bit!(opcode, 23);
@@ -1289,10 +1313,6 @@ pub fn execute_single_data_transfer<BusType: SystemBus>(
 }
 
 fn try_decode_swp(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0FB00FF0 != 0x01000090 {
-        return None;
-    }
-
     let word = !test_bit!(opcode, 22);
     let src_register = extract_mask!(opcode, 0xFu32) as u8;
     let dest_register = extract_mask!(opcode, 0xF000u32) as u8;
@@ -1342,13 +1362,7 @@ pub fn execute_swp<BusType: SystemBus>(
 }
 
 fn try_decode_swi(opcode: u32) -> Option<DecodedArmOpcode> {
-    let mask = 0xF << 24;
-    if opcode & mask != mask {
-        return None;
-    }
-
     let comment = opcode & 0x00FFFFFF;
-
     Some(DecodedArmOpcode::Swi { comment })
 }
 
@@ -1361,41 +1375,37 @@ pub fn execute_swi<BusType: SystemBus>(cpu: &mut Arm7Cpu, bus: &mut BusType) {
     cpu.reload_pipeline(bus);
 }
 
-fn try_decode_psr_transfer(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0FBF0FFF == 0x010F0000 {
-        let sub_opcode = PsrTransferOpcode::Mrs;
-        let transfer_spsr = test_bit!(opcode, 22);
-        let register = extract_mask!(opcode, 0xF000u32) as u8;
+fn decode_mrs(opcode: u32) -> Option<DecodedArmOpcode> {
+    let sub_opcode = PsrTransferOpcode::Mrs;
+    let transfer_spsr = test_bit!(opcode, 22);
+    let register = extract_mask!(opcode, 0xF000u32) as u8;
 
-        return Some(DecodedArmOpcode::PsrTransfer {
-            sub_opcode,
-            transfer_spsr,
-            operand: PsrTransferOperand::Register(register),
-        });
-    }
+    return Some(DecodedArmOpcode::PsrTransfer {
+        sub_opcode,
+        transfer_spsr,
+        operand: PsrTransferOperand::Register(register),
+    });
+}
 
-    if opcode & 0x0D90F000 == 0x0100F000 {
-        let write_to = extract_mask!(opcode, 0xF0000u32) as u8;
-        let sub_opcode = PsrTransferOpcode::Msr(write_to);
-        let transfer_spsr = test_bit!(opcode, 22);
+fn decode_msr(opcode: u32) -> Option<DecodedArmOpcode> {
+    let write_to = extract_mask!(opcode, 0xF0000u32) as u8;
+    let sub_opcode = PsrTransferOpcode::Msr(write_to);
+    let transfer_spsr = test_bit!(opcode, 22);
 
-        let operand = if test_bit!(opcode, 25) {
-            let imm = extract_mask!(opcode, 0xFFu32) as u8;
-            let rotate_by = extract_mask!(opcode, 0xF00u32) as u8;
-            PsrTransferOperand::Immediate { imm, rotate_by }
-        } else {
-            let register = extract_mask!(opcode, 0xFu32) as u8;
-            PsrTransferOperand::Register(register)
-        };
+    let operand = if test_bit!(opcode, 25) {
+        let imm = extract_mask!(opcode, 0xFFu32) as u8;
+        let rotate_by = extract_mask!(opcode, 0xF00u32) as u8;
+        PsrTransferOperand::Immediate { imm, rotate_by }
+    } else {
+        let register = extract_mask!(opcode, 0xFu32) as u8;
+        PsrTransferOperand::Register(register)
+    };
 
-        return Some(DecodedArmOpcode::PsrTransfer {
-            sub_opcode,
-            transfer_spsr,
-            operand,
-        });
-    }
-
-    None
+    return Some(DecodedArmOpcode::PsrTransfer {
+        sub_opcode,
+        transfer_spsr,
+        operand,
+    });
 }
 
 pub fn execute_psr_transfer<BusType: SystemBus>(
@@ -1466,30 +1476,26 @@ fn transfer_psr(cpu: &mut Arm7Cpu, transfer_spsr: bool, write_to: u8, mut value:
 }
 
 fn try_decode_multiply_accumulate(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0FC000F0 == 0x00000090 {
-        let set_condition_codes = test_bit!(opcode, 20);
-        let dest_register = extract_mask!(opcode, 0xF0000u32) as u8;
-        let acc_register = extract_mask!(opcode, 0xF000u32) as u8;
-        let operand_register_rs = extract_mask!(opcode, 0xF00u32) as u8;
-        let operand_register_rm = extract_mask!(opcode, 0xFu32) as u8;
+    let set_condition_codes = test_bit!(opcode, 20);
+    let dest_register = extract_mask!(opcode, 0xF0000u32) as u8;
+    let acc_register = extract_mask!(opcode, 0xF000u32) as u8;
+    let operand_register_rs = extract_mask!(opcode, 0xF00u32) as u8;
+    let operand_register_rm = extract_mask!(opcode, 0xFu32) as u8;
 
-        let sub_opcode = extract_mask!(opcode, 0xF00000u32);
-        let acc_register = if test_bit!(opcode, 21) {
-            Some(acc_register)
-        } else {
-            None
-        };
-
-        Some(DecodedArmOpcode::MultiplyAccumulate {
-            set_condition_codes,
-            operand_register_rm,
-            operand_register_rs,
-            acc_register,
-            dest_register,
-        })
+    let sub_opcode = extract_mask!(opcode, 0xF00000u32);
+    let acc_register = if test_bit!(opcode, 21) {
+        Some(acc_register)
     } else {
         None
-    }
+    };
+
+    Some(DecodedArmOpcode::MultiplyAccumulate {
+        set_condition_codes,
+        operand_register_rm,
+        operand_register_rs,
+        acc_register,
+        dest_register,
+    })
 }
 
 pub(crate) fn execute_multiply_accumulate<BusType: SystemBus>(
@@ -1532,27 +1538,23 @@ pub(crate) fn execute_multiply_accumulate<BusType: SystemBus>(
 }
 
 fn try_decode_long_multiply_accumulate(opcode: u32) -> Option<DecodedArmOpcode> {
-    if opcode & 0x0F8000F0 == 0x00800090 {
-        let signed = test_bit!(opcode, 22);
-        let accumulate = test_bit!(opcode, 21);
-        let set_condition_codes = test_bit!(opcode, 20);
-        let dest_register_hi = extract_mask!(opcode, 0xF0000u32) as u8;
-        let dest_register_lo = extract_mask!(opcode, 0xF000u32) as u8;
-        let operand_register_rs = extract_mask!(opcode, 0xF00u32) as u8;
-        let operand_register_rm = extract_mask!(opcode, 0xFu32) as u8;
+    let signed = test_bit!(opcode, 22);
+    let accumulate = test_bit!(opcode, 21);
+    let set_condition_codes = test_bit!(opcode, 20);
+    let dest_register_hi = extract_mask!(opcode, 0xF0000u32) as u8;
+    let dest_register_lo = extract_mask!(opcode, 0xF000u32) as u8;
+    let operand_register_rs = extract_mask!(opcode, 0xF00u32) as u8;
+    let operand_register_rm = extract_mask!(opcode, 0xFu32) as u8;
 
-        Some(DecodedArmOpcode::LongMultiplyAccumulate {
-            set_condition_codes,
-            operand_register_rm,
-            operand_register_rs,
-            dest_register_lo,
-            dest_register_hi,
-            signed,
-            accumulate,
-        })
-    } else {
-        None
-    }
+    Some(DecodedArmOpcode::LongMultiplyAccumulate {
+        set_condition_codes,
+        operand_register_rm,
+        operand_register_rs,
+        dest_register_lo,
+        dest_register_hi,
+        signed,
+        accumulate,
+    })
 }
 
 pub(crate) fn execute_long_multiply_accumulate<BusType: SystemBus>(

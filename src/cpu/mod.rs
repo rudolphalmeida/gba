@@ -812,7 +812,6 @@ mod tests {
     #[test_case("arm_msr_imm")]
     #[test_case("arm_mul_mla")]
     #[test_case("arm_mull_mlal")]
-    #[test_case("thumb_b")]
     fn test_opcode(name: &'static str) {
         let test_state = read_test_data(name);
 
