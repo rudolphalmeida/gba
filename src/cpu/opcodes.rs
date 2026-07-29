@@ -5,33 +5,6 @@ use crate::system_bus::{ACCESS_CODE, ACCESS_LOCK, ACCESS_NONSEQ, ACCESS_SEQ, Sys
 use crate::{extract_mask, test_bit};
 use std::cmp::PartialEq;
 
-/*
-ARM7TDMI - ARM instructions
- 2         0
- 765'43210 7654  Instructions/groups
- ------------------------------------------------------------
- 000'000.. 1001  MUL, MLA
- 000'01... 1001  MULL, MLAL
- 000'10.00 1001  SWP
- 000'..... 1011  LDRH, STRH
- 000'....1 11.1  LDRSB, LDRSH
- 000'10.00 0000  MRS
- 000'10.10 0000  MSR (register)
- 001'10.10 ....  MSR (immediate)
- 000'10010 0001  BX
- 000'..... ...0  Data Processing (immediate shift)
- 000'..... 0..1  Data Processing (register shift)
- 001'10.00 ....  Undefined instructions in Data Processing
- 001'..... ....  Data Processing (immediate value)
- 010'..... ....  LDR, STR (immediate offset)
- 011'..... ...0  LDR, STR (register offset)
- 100'..... ....  LDM, STM
- 101'..... ....  B, BL
- 110'..... ....  STC, LDC
- 111'0.... ...0  CDP
- 111'0.... ...1  MCR, MRC
- 111'1.... ....  SWI
- */
 pub fn decode_arm_opcode(opcode: u32) -> Option<Opcode> {
     let mask = extract_mask!(opcode, 0x0FF00000u32) << 4 | extract_mask!(opcode, 0xF0u32);
 

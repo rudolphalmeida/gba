@@ -7,6 +7,14 @@ pub const ACCESS_CODE: u8 = 2;
 pub const ACCESS_DMA: u8 = 4;
 pub const ACCESS_LOCK: u8 = 8;
 
+pub const ON_BOARD_WRAM_START: usize = 0x2000000;
+pub const ON_BOARD_WRAM_END: usize = 0x203FFFF;
+pub const ON_BOARD_WRAM_SIZE: usize = ON_BOARD_WRAM_END - ON_BOARD_WRAM_START + 1;
+
+pub const ON_CHIP_WRAM_START: usize = 0x3000000;
+pub const ON_CHIP_WRAM_END: usize = 0x3007FFF;
+pub const ON_CHIP_WRAM_SIZE: usize = ON_CHIP_WRAM_END - ON_CHIP_WRAM_START + 1;
+
 pub trait SystemBus {
     fn idle(&mut self);
 
@@ -24,6 +32,9 @@ pub struct Bus {
     gamepak: Gamepak,
     bios: Vec<u8>,
     bios_active: bool,
+
+    on_board_wram: [u8; ON_BOARD_WRAM_SIZE],
+    on_chip_wram: [u8; ON_CHIP_WRAM_SIZE],
 }
 
 impl Bus {
@@ -32,6 +43,8 @@ impl Bus {
             gamepak,
             bios,
             bios_active: true,
+            on_board_wram: [0x00; ON_BOARD_WRAM_SIZE],
+            on_chip_wram: [0x00; ON_CHIP_WRAM_SIZE],
         }
     }
 

@@ -135,7 +135,7 @@ impl Arm7Cpu {
     fn execute_next_thumb<BusType: SystemBus>(&mut self, bus: &mut BusType) {
         let execute_opcode = self.pipeline[0] as u16;
         self.registers[PC_IDX] &= !1; // Ensure PC is half-word aligned
-        let execute_address = self.registers[PC_IDX] - 8;
+        let execute_address = self.registers[PC_IDX] - 4;
 
         self.pipeline[0] = self.pipeline[1];
         // The corresponding PC increment is implemented in the opcodes. Since this fetch and the
@@ -153,7 +153,7 @@ impl Arm7Cpu {
                     did_execute: false,
                 }));
         } else {
-            self.registers.get_and_incr_pc(4);
+            self.registers.get_and_incr_pc(2);
             self.opcode_traces.push_back(OpcodeTraceLog::NotDecoded(
                 execute_address,
                 execute_opcode as u32,
