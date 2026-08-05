@@ -57,19 +57,20 @@ impl Bus {
         }
     }
 
+    fn write_to<const N: usize>(&mut self, address: u32, data: u32, _access: u8) {}
+
     fn read_at<const N: usize>(&mut self, address: u32, _access: u8) -> [u8; N] {
         let mut bytes = [0x00; N];
+        let address = address as usize;
 
         match address {
             0x00000000..0x00004000 if self.bios_active => {
-                let address = address as usize;
-                // self.bios[address..address + 4].iter()
-                bytes[..=3].copy_from_slice(&self.bios[address..address + N]);
+                bytes[..N].copy_from_slice(&self.bios[address..address + N]);
             }
-            _ => todo!(
-                "Unimplemented memory map region for read_word: {:#010X}",
-                address
-            ),
+            _ if N == 4 => bytes[..4].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]),
+            _ if N == 2 => bytes[..2].copy_from_slice(&[0xFF, 0xFF]),
+            _ if N == 1 => bytes[..1].copy_from_slice(&[0xFF]),
+            _ => {}
         }
 
         bytes
@@ -83,8 +84,8 @@ impl SystemBus for Bus {
         u32::from_le_bytes(self.read_at::<4>(address & !3, access))
     }
 
-    fn write_word(&mut self, address: u32, data: u32, _access: u8) {
-        todo!()
+    fn write_word(&mut self, address: u32, data: u32, access: u8) {
+        self.write_to::<4>(address & !3, data, access);
     }
 
     fn read_half_word(&mut self, address: u32, access: u8) -> u16 {
@@ -92,7 +93,7 @@ impl SystemBus for Bus {
     }
 
     fn write_half_word(&mut self, address: u32, data: u16, access: u8) {
-        todo!()
+        self.write_to::<2>(address & !1, data as u32, access);
     }
 
     fn read_byte(&mut self, address: u32, access: u8) -> u8 {
@@ -100,7 +101,7 @@ impl SystemBus for Bus {
     }
 
     fn write_byte(&mut self, address: u32, data: u8, access: u8) {
-        todo!()
+        self.write_to::<1>(address, data as u32, access);
     }
 }
 
